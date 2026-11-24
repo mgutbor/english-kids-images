@@ -1,0 +1,7 @@
+# Credenciales WiFi
+secrets.h
+
+# Archivos del sistema
+.DS_Store
+.vscode/
+firmware/secrets.h

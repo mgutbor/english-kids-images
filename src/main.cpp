@@ -13,14 +13,6 @@
 // Credenciales Wi-Fi
 #include "secrets.h"
 
-// Imagenes originales de respaldo
-#include "ugly.h"
-#include "beautiful.h"
-#include "happy.h"
-#include "sad.h"
-#include "old.h"
-#include "young.h"
-
 // =====================================
 // CONFIGURACION HARDWARE
 // =====================================
@@ -44,42 +36,23 @@ Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
 #define DARK_BLUE  0x192F
 #define LIGHT_BG   0xEF7D
 #define GREEN      0x2666
-#define ORANGE     0xFD20
 
 // =====================================
-// WIFI
+// CONFIGURACION GENERAL
 // =====================================
-
-bool wifiConnected = false;
-bool littleFSReady = false;
-
-// =====================================
-// ACTUALIZACIONES GITHUB
-// =====================================
-
-const char* MANIFEST_URL =
-    "https://raw.githubusercontent.com/mgutbor/english-kids-images/main/version.json";
 
 const char* GITHUB_RAW =
     "https://raw.githubusercontent.com/mgutbor/english-kids-images/main/";
 
-const char* IMAGE_FILES[] = {
-    "ugly.rgb565",
-    "beautiful.rgb565",
-    "happy.rgb565",
-    "sad.rgb565",
-    "old.rgb565",
-    "young.rgb565"
-};
+const char* CONFIG_URL =
+    "https://raw.githubusercontent.com/mgutbor/english-kids-images/main/config.json";
 
-const int TOTAL_IMAGES = 6;
+#define MAX_WORDS 30
 
-unsigned long bothButtonsPressedAt = 0;
-bool updateCombinationHandled = false;
-
-// =====================================
-// IMAGENES
-// =====================================
+#define MAX_COLLECTION_ID 48
+#define MAX_WORD_ID       40
+#define MAX_WORD_TEXT     32
+#define MAX_IMAGE_FILE    64
 
 #define IMAGE_WIDTH  120
 #define IMAGE_HEIGHT 120
@@ -87,37 +60,48 @@ bool updateCombinationHandled = false;
 const size_t IMAGE_BYTES =
     IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(uint16_t);
 
-uint16_t imageBuffer[IMAGE_WIDTH * IMAGE_HEIGHT];
+const size_t CONTENT_JSON_CAPACITY = 16384;
+const size_t CONFIG_JSON_CAPACITY = 1024;
+
+bool wifiConnected = false;
+bool littleFSReady = false;
+bool collectionLoaded = false;
+
+char activeCollection[MAX_COLLECTION_ID] = "";
+char collectionTitle[64] = "";
+
+unsigned long bothButtonsPressedAt = 0;
+bool updateCombinationHandled = false;
 
 // =====================================
-// VOCABULARIO
+// VOCABULARIO DINAMICO
 // =====================================
 
 struct Word {
-    const char* spanish;
-    const char* english;
-    uint8_t illustration;
+    char id[MAX_WORD_ID];
+    char spanish[MAX_WORD_TEXT];
+    char english[MAX_WORD_TEXT];
+
+    char imageFile[MAX_IMAGE_FILE];
+    char imageHash[65];
+
+    bool hasImage;
+    bool imageAvailable;
 };
 
-Word words[] = {
-    {"FEO",       "UGLY",      0},
-    {"GUAPO",     "BEAUTIFUL", 1},
-    {"ALEGRE",    "HAPPY",     2},
-    {"TRISTE",    "SAD",       3},
-    {"VIEJO",     "OLD",       4},
-    {"JOVEN",     "YOUNG",     5}
-};
+Word words[MAX_WORDS];
 
-const int TOTAL_WORDS = 6;
+int TOTAL_WORDS = 0;
 
-int questionOrder[TOTAL_WORDS];
+int questionOrder[MAX_WORDS];
+
 int currentQuestion = 0;
 int score = 0;
 
-int leftOption;
-int rightOption;
-bool leftIsCorrect;
+int leftOption = 0;
+int rightOption = 0;
 
+bool leftIsCorrect = false;
 bool gameFinished = false;
 
 bool lastRedState = HIGH;
@@ -127,15 +111,274 @@ unsigned long lastPress = 0;
 const unsigned long debounceDelay = 180;
 
 // =====================================
+// BUFFER DE IMAGEN
+// =====================================
+
+uint16_t imageBuffer[IMAGE_WIDTH * IMAGE_HEIGHT];
+
+// =====================================
 // PROTOTIPOS
 // =====================================
 
 void drawEndScreen();
 void drawQuestion();
-void updateImagesFromGitHub();
+void startGame();
+
+bool loadActiveCollectionFromLocal();
+bool updateCollectionFromGitHub();
+void updateImagesForActiveCollection();
+
+void connectWiFi();
+void initLittleFS();
 
 // =====================================
-// CONEXION WIFI
+// UTILIDADES
+// =====================================
+
+bool isValidIdentifier(const char* value) {
+
+    if (!value || !value[0]) {
+        return false;
+    }
+
+    for (int i = 0; value[i]; i++) {
+
+        char c = value[i];
+
+        if (!((c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') ||
+              c == '-' ||
+              c == '_')) {
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool isValidImageFilename(const char* filename) {
+
+    if (!filename || !filename[0]) {
+        return false;
+    }
+
+    if (strchr(filename, '/') ||
+        strchr(filename, '\\')) {
+
+        return false;
+    }
+
+    size_t length = strlen(filename);
+
+    if (length < 7 || length >= MAX_IMAGE_FILE) {
+        return false;
+    }
+
+    return strcmp(
+        filename + length - 7,
+        ".rgb565"
+    ) == 0;
+}
+
+bool isValidSHA256(const char* hash) {
+
+    if (!hash || strlen(hash) != 64) {
+        return false;
+    }
+
+    for (int i = 0; i < 64; i++) {
+
+        char c = hash[i];
+
+        if (!((c >= '0' && c <= '9') ||
+              (c >= 'a' && c <= 'f'))) {
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool copyJsonString(
+    JsonVariantConst value,
+    char* destination,
+    size_t destinationSize
+) {
+
+    if (value.isNull()) {
+        return false;
+    }
+
+    const char* source = value.as<const char*>();
+
+    if (!source || !source[0]) {
+        return false;
+    }
+
+    size_t length = strlen(source);
+
+    if (length >= destinationSize) {
+        return false;
+    }
+
+    memcpy(destination, source, length + 1);
+
+    return true;
+}
+
+String collectionDirectory() {
+
+    return "/collections/" + String(activeCollection);
+}
+
+String collectionContentPath() {
+
+    return collectionDirectory() + "/content.json";
+}
+
+String collectionImagesDirectory() {
+
+    return collectionDirectory() + "/images";
+}
+
+String getWordImagePath(int index) {
+
+    return collectionImagesDirectory() + "/" +
+           String(words[index].imageFile);
+}
+
+// =====================================
+// CREAR DIRECTORIOS
+// =====================================
+
+bool ensureDirectory(const String& path) {
+
+    if (LittleFS.exists(path)) {
+        return true;
+    }
+
+    String current = "";
+
+    for (int i = 0; i < path.length(); i++) {
+
+        if (path[i] == '/') {
+
+            if (current.length() > 0 &&
+                !LittleFS.exists(current)) {
+
+                if (!LittleFS.mkdir(current)) {
+                    return false;
+                }
+            }
+        }
+
+        current += path[i];
+    }
+
+    if (!LittleFS.exists(path)) {
+        return LittleFS.mkdir(path);
+    }
+
+    return true;
+}
+
+// =====================================
+// RECUPERACION DE ARCHIVOS ATOMICOS
+// =====================================
+
+void recoverAtomicFile(const String& target) {
+
+    String backup = target + ".bak";
+    String temp = target + ".tmp";
+
+    if (!LittleFS.exists(target) &&
+        LittleFS.exists(backup)) {
+
+        LittleFS.rename(backup, target);
+
+    } else if (LittleFS.exists(target) &&
+               LittleFS.exists(backup)) {
+
+        LittleFS.remove(backup);
+    }
+
+    if (LittleFS.exists(temp)) {
+        LittleFS.remove(temp);
+    }
+}
+
+// =====================================
+// ESCRITURA ATOMICA
+// =====================================
+
+bool writeFileAtomic(
+    const String& target,
+    const String& content
+) {
+
+    String temp = target + ".tmp";
+    String backup = target + ".bak";
+
+    int separator = target.lastIndexOf('/');
+
+    if (separator > 0) {
+
+        String directory = target.substring(0, separator);
+
+        if (!ensureDirectory(directory)) {
+            return false;
+        }
+    }
+
+    LittleFS.remove(temp);
+
+    File file = LittleFS.open(temp, "w");
+
+    if (!file) {
+        return false;
+    }
+
+    size_t written = file.print(content);
+
+    file.flush();
+    file.close();
+
+    if (written != content.length()) {
+
+        LittleFS.remove(temp);
+        return false;
+    }
+
+    LittleFS.remove(backup);
+
+    if (LittleFS.exists(target)) {
+
+        if (!LittleFS.rename(target, backup)) {
+
+            LittleFS.remove(temp);
+            return false;
+        }
+    }
+
+    if (!LittleFS.rename(temp, target)) {
+
+        if (LittleFS.exists(backup)) {
+            LittleFS.rename(backup, target);
+        }
+
+        return false;
+    }
+
+    LittleFS.remove(backup);
+
+    return true;
+}
+
+// =====================================
+// WIFI
 // =====================================
 
 void connectWiFi() {
@@ -185,23 +428,11 @@ void initLittleFS() {
 
     Serial.println("\n===== INICIALIZANDO LITTLEFS =====");
 
+    // No formateamos automaticamente:
+    // un formateo podria borrar la ultima
+    // coleccion valida almacenada.
+
     littleFSReady = LittleFS.begin(false);
-
-    if (!littleFSReady) {
-
-        Serial.println("LittleFS no monta. Intentando formatear...");
-
-        if (LittleFS.format()) {
-
-            Serial.println("Formateo correcto.");
-
-            littleFSReady = LittleFS.begin(false);
-
-        } else {
-
-            Serial.println("ERROR: No se pudo formatear LittleFS.");
-        }
-    }
 
     if (littleFSReady) {
 
@@ -217,138 +448,512 @@ void initLittleFS() {
             LittleFS.usedBytes()
         );
 
+        recoverAtomicFile("/config.json");
+
     } else {
 
-        Serial.println("ERROR: LittleFS sigue sin estar disponible.");
+        Serial.println("ERROR: LittleFS no disponible.");
     }
 }
 
 // =====================================
-// RECUPERACION DE ARCHIVOS TEMPORALES
+// DESCARGAR TEXTO DESDE GITHUB
 // =====================================
 
-void recoverImageFiles() {
 
-    Serial.println("\nComprobando archivos temporales...");
-
-    for (int i = 0; i < TOTAL_IMAGES; i++) {
-
-        String target = "/" + String(IMAGE_FILES[i]);
-        String backup = target + ".bak";
-        String temp = target + ".tmp";
-
-        // Si no existe la imagen original,
-        // recuperamos la copia de seguridad.
-
-        if (!LittleFS.exists(target) &&
-            LittleFS.exists(backup)) {
-
-            Serial.println("Recuperando copia de seguridad");
-
-            LittleFS.rename(backup, target);
-
-        } else if (LittleFS.exists(target) &&
-                   LittleFS.exists(backup)) {
-
-            LittleFS.remove(backup);
-        }
-
-        // Eliminar descargas incompletas.
-
-        if (LittleFS.exists(temp)) {
-            LittleFS.remove(temp);
-        }
-    }
-}
-
-// =====================================
-// GUARDAR IMAGEN EN LITTLEFS
-// =====================================
-
-bool saveImageIfNeeded(
-    const char* path,
-    const uint16_t* bitmap
+bool downloadText(
+    const String& url,
+    String& payload
 ) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(30000);
 
-    if (LittleFS.exists(path)) {
+    HTTPClient http;
+    http.setTimeout(30000);
 
-        File existingFile = LittleFS.open(path, "r");
-
-        if (existingFile) {
-
-            bool validSize = existingFile.size() == IMAGE_BYTES;
-
-            existingFile.close();
-
-            if (validSize) {
-
-                Serial.print("Imagen ya instalada: ");
-                Serial.println(path);
-
-                return true;
-            }
-        }
-    }
-
-    Serial.print("Instalando imagen: ");
-    Serial.println(path);
-
-    File file = LittleFS.open(path, "w");
-
-    if (!file) {
-
-        Serial.println("Error creando archivo");
-
-        return false;
-    }
-
-    size_t written = file.write(
-        (const uint8_t*)bitmap,
-        IMAGE_BYTES
+    http.setFollowRedirects(
+        HTTPC_STRICT_FOLLOW_REDIRECTS
     );
 
-    file.close();
+    // Evitar respuestas almacenadas en caché.
+    String requestUrl = url;
+    requestUrl += (url.indexOf('?') >= 0) ? "&" : "?";
+    requestUrl += "_ts=" + String(millis());
 
-    if (written != IMAGE_BYTES) {
+    Serial.println();
+    Serial.println("===== DESCARGA HTTP =====");
+    Serial.print("URL: ");
+    Serial.println(requestUrl);
 
-        Serial.println("Error escribiendo imagen");
+    if (!http.begin(client, requestUrl)) {
+        Serial.println("No se pudo iniciar HTTP");
+        return false;
+    }
+
+    http.addHeader("Cache-Control", "no-cache, no-store");
+    http.addHeader("Pragma", "no-cache");
+
+    int httpCode = http.GET();
+
+    Serial.printf("HTTP: %d\n", httpCode);
+
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.println("Error en la descarga");
+        http.end();
+        return false;
+    }
+
+    payload = http.getString();
+
+    Serial.printf(
+        "Bytes recibidos: %u\n",
+        (unsigned int)payload.length()
+    );
+
+    Serial.println("Contenido recibido:");
+    Serial.println(payload);
+    Serial.println("========================");
+
+    http.end();
+
+    return payload.length() > 0;
+}
+
+// =====================================
+// VALIDAR CONFIG.JSON
+// =====================================
+
+bool parseConfig(
+    const String& payload,
+    char* collectionId,
+    size_t collectionIdSize
+) {
+
+    DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
+
+    DeserializationError error =
+        deserializeJson(doc, payload);
+
+    if (error) {
+
+        Serial.print("Error en config.json: ");
+        Serial.println(error.c_str());
 
         return false;
     }
 
-    Serial.println("Imagen guardada correctamente");
+    if (!doc["activeCollection"].is<const char*>()) {
+        return false;
+    }
+
+    if (!copyJsonString(
+            doc["activeCollection"],
+            collectionId,
+            collectionIdSize
+        )) {
+
+        return false;
+    }
+
+    if (!isValidIdentifier(collectionId)) {
+        return false;
+    }
 
     return true;
 }
 
 // =====================================
-// INSTALAR LAS SEIS IMAGENES
+// VALIDAR CONTENT.JSON
 // =====================================
 
-void installDefaultImages() {
+bool validateContentJson(
+    const String& payload,
+    String& errorMessage
+) {
+
+    DynamicJsonDocument doc(CONTENT_JSON_CAPACITY);
+
+    DeserializationError error =
+        deserializeJson(doc, payload);
+
+    if (error) {
+
+        errorMessage = String("JSON invalido: ") +
+                       error.c_str();
+
+        return false;
+    }
+
+    if (!doc["words"].is<JsonArray>()) {
+
+        errorMessage = "No existe una lista words valida";
+
+        return false;
+    }
+
+    JsonArray wordsArray = doc["words"].as<JsonArray>();
+
+    if (wordsArray.size() < 2) {
+
+        errorMessage = "La coleccion necesita al menos dos palabras";
+
+        return false;
+    }
+
+    if (wordsArray.size() > MAX_WORDS) {
+
+        errorMessage = "La coleccion supera el maximo de palabras";
+
+        return false;
+    }
+
+    for (JsonObject word : wordsArray) {
+
+        const char* id = word["id"] | "";
+        const char* spanish = word["spanish"] | "";
+        const char* english = word["english"] | "";
+
+        if (!isValidIdentifier(id) ||
+            !spanish[0] ||
+            !english[0] ||
+            strlen(id) >= MAX_WORD_ID ||
+            strlen(spanish) >= MAX_WORD_TEXT ||
+            strlen(english) >= MAX_WORD_TEXT) {
+
+            errorMessage = "Una palabra tiene campos invalidos";
+
+            return false;
+        }
+    }
+
+    errorMessage = "";
+
+    return true;
+}
+
+// =====================================
+// DESCARGAR CONFIG Y COLECCION
+// =====================================
+
+bool updateCollectionFromGitHub() {
+
+    if (!wifiConnected ||
+        WiFi.status() != WL_CONNECTED) {
+
+        Serial.println("Sin Wi-Fi. No se buscan actualizaciones.");
+
+        return false;
+    }
 
     if (!littleFSReady) {
 
         Serial.println("LittleFS no disponible");
 
-        return;
+        return false;
     }
 
     Serial.println();
-    Serial.println("Instalando imagenes...");
+    Serial.println("===== ACTUALIZANDO COLECCION =====");
 
-    saveImageIfNeeded("/ugly.rgb565", ugly);
-    saveImageIfNeeded("/beautiful.rgb565", beautiful);
-    saveImageIfNeeded("/happy.rgb565", happy);
-    saveImageIfNeeded("/sad.rgb565", sad);
-    saveImageIfNeeded("/old.rgb565", old);
-    saveImageIfNeeded("/young.rgb565", young);
+    // ---------------------------------
+    // 1. Descargar config.json
+    // ---------------------------------
 
-    Serial.println("Instalacion de imagenes finalizada");
+    String configPayload;
+
+    if (!downloadText(CONFIG_URL, configPayload)) {
+
+        Serial.println("No se pudo descargar config.json");
+
+        return false;
+    }
+
+    char remoteCollection[MAX_COLLECTION_ID] = "";
+
+    if (!parseConfig(
+            configPayload,
+            remoteCollection,
+            sizeof(remoteCollection)
+        )) {
+
+        Serial.println("config.json no valido");
+
+        return false;
+    }
+
+    Serial.print("Coleccion publicada: ");
+    Serial.println(remoteCollection);
+
+    // ---------------------------------
+    // 2. Descargar content.json
+    // ---------------------------------
+
+    String contentUrl =
+        String(GITHUB_RAW) +
+        "collections/" +
+        remoteCollection +
+        "/content.json";
+
+    String contentPayload;
+
+    if (!downloadText(contentUrl, contentPayload)) {
+
+        Serial.println("No se pudo descargar content.json");
+
+        return false;
+    }
+
+    // ---------------------------------
+    // 3. Validar contenido
+    // ---------------------------------
+
+    String validationError;
+
+    if (!validateContentJson(
+            contentPayload,
+            validationError
+        )) {
+
+        Serial.print("Coleccion rechazada: ");
+        Serial.println(validationError);
+
+        return false;
+    }
+
+    // ---------------------------------
+    // 4. Guardar content.json
+    // ---------------------------------
+
+    String contentPath =
+        "/collections/" +
+        String(remoteCollection) +
+        "/content.json";
+
+    Serial.println("Guardando contenido validado...");
+
+    if (!writeFileAtomic(
+            contentPath,
+            contentPayload
+        )) {
+
+        Serial.println("Error guardando content.json");
+
+        return false;
+    }
+
+    // ---------------------------------
+    // 5. Guardar config.json
+    // ---------------------------------
+
+    Serial.println("Activando nueva configuracion...");
+
+    if (!writeFileAtomic(
+            "/config.json",
+            configPayload
+        )) {
+
+        Serial.println("Error guardando config.json");
+
+        return false;
+    }
+
+    Serial.println("Coleccion actualizada correctamente");
+
+    return true;
 }
 
 // =====================================
-// CALCULAR SHA-256 DE UN ARCHIVO
+// CARGAR COLECCION DESDE LITTLEFS
+// =====================================
+
+bool loadActiveCollectionFromLocal() {
+
+    if (!littleFSReady) {
+        return false;
+    }
+
+    Serial.println();
+    Serial.println("===== CARGANDO COLECCION LOCAL =====");
+
+    recoverAtomicFile("/config.json");
+
+    File configFile = LittleFS.open("/config.json", "r");
+
+    if (!configFile) {
+
+        Serial.println("No existe config.json local");
+
+        return false;
+    }
+
+    String configPayload = configFile.readString();
+
+    configFile.close();
+
+    char collectionId[MAX_COLLECTION_ID] = "";
+
+    if (!parseConfig(
+            configPayload,
+            collectionId,
+            sizeof(collectionId)
+        )) {
+
+        Serial.println("Configuracion local no valida");
+
+        return false;
+    }
+
+    String contentPath =
+        "/collections/" +
+        String(collectionId) +
+        "/content.json";
+
+    recoverAtomicFile(contentPath);
+
+    File contentFile = LittleFS.open(contentPath, "r");
+
+    if (!contentFile) {
+
+        Serial.println("No existe content.json local");
+
+        return false;
+    }
+
+    DynamicJsonDocument doc(CONTENT_JSON_CAPACITY);
+
+    DeserializationError error =
+        deserializeJson(doc, contentFile);
+
+    contentFile.close();
+
+    if (error) {
+
+        Serial.print("Error leyendo coleccion local: ");
+        Serial.println(error.c_str());
+
+        return false;
+    }
+
+    JsonArray wordsArray = doc["words"].as<JsonArray>();
+
+    if (wordsArray.isNull() ||
+        wordsArray.size() < 2 ||
+        wordsArray.size() > MAX_WORDS) {
+
+        Serial.println("Numero de palabras no valido");
+
+        return false;
+    }
+
+    // ---------------------------------
+    // Construir vocabulario en memoria
+    // ---------------------------------
+
+    TOTAL_WORDS = 0;
+
+    memset(words, 0, sizeof(words));
+
+    for (JsonObject item : wordsArray) {
+
+        Word& word = words[TOTAL_WORDS];
+
+        if (!copyJsonString(
+                item["id"],
+                word.id,
+                sizeof(word.id)
+            ) ||
+            !copyJsonString(
+                item["spanish"],
+                word.spanish,
+                sizeof(word.spanish)
+            ) ||
+            !copyJsonString(
+                item["english"],
+                word.english,
+                sizeof(word.english)
+            )) {
+
+            Serial.println("Palabra invalida en coleccion local");
+
+            TOTAL_WORDS = 0;
+
+            return false;
+        }
+
+        JsonObject image = item["image"].as<JsonObject>();
+
+        word.hasImage = false;
+        word.imageAvailable = false;
+
+        if (!image.isNull()) {
+
+            const char* filename = image["file"] | "";
+            const char* hash = image["sha256"] | "";
+
+            bool available = image["available"] | false;
+            size_t size = image["size"] | 0;
+
+            if (available &&
+                isValidImageFilename(filename) &&
+                isValidSHA256(hash) &&
+                size == IMAGE_BYTES) {
+
+                snprintf(
+                    word.imageFile,
+                    sizeof(word.imageFile),
+                    "%s",
+                    filename
+                );
+
+                snprintf(
+                    word.imageHash,
+                    sizeof(word.imageHash),
+                    "%s",
+                    hash
+                );
+
+                word.hasImage = true;
+            }
+        }
+
+        TOTAL_WORDS++;
+    }
+
+    snprintf(
+        activeCollection,
+        sizeof(activeCollection),
+        "%s",
+        collectionId
+    );
+
+    const char* title = doc["title"] | "English Kids";
+
+    snprintf(
+        collectionTitle,
+        sizeof(collectionTitle),
+        "%s",
+        title
+    );
+
+    collectionLoaded = true;
+
+    Serial.println("Coleccion cargada correctamente");
+
+    Serial.print("Identificador: ");
+    Serial.println(activeCollection);
+
+    Serial.print("Titulo: ");
+    Serial.println(collectionTitle);
+
+    Serial.print("Palabras: ");
+    Serial.println(TOTAL_WORDS);
+
+    return true;
+}
+
+// =====================================
+// CALCULAR SHA-256 DE ARCHIVO
 // =====================================
 
 bool calculateFileSHA256(
@@ -431,199 +1036,83 @@ bool calculateFileSHA256(
 }
 
 // =====================================
-// COMPROBAR SI UNA IMAGEN NECESITA UPDATE
+// COMPROBAR IMAGEN LOCAL
 // =====================================
 
-bool imageNeedsUpdate(
-    const char* path,
-    const char* expectedHash
-) {
+bool localImageIsValid(int index) {
+
+    if (!words[index].hasImage) {
+        return false;
+    }
+
+    String path = getWordImagePath(index);
+
+    File file = LittleFS.open(path, "r");
+
+    if (!file) {
+        return false;
+    }
+
+    bool validSize = file.size() == IMAGE_BYTES;
+
+    file.close();
+
+    if (!validSize) {
+        return false;
+    }
 
     char localHash[65];
 
-    if (!LittleFS.exists(path)) {
-        return true;
-    }
-
     if (!calculateFileSHA256(
-            path,
+            path.c_str(),
             localHash,
             sizeof(localHash)
         )) {
 
-        return true;
+        return false;
     }
 
-    return strcmp(localHash, expectedHash) != 0;
+    return strcmp(
+        localHash,
+        words[index].imageHash
+    ) == 0;
 }
 
 // =====================================
-// DESCARGAR Y SUSTITUIR UNA IMAGEN
+// DESCARGAR UNA IMAGEN
 // =====================================
 
+bool downloadImage(int index) {
 
+    if (!words[index].hasImage) {
+        return false;
+    }
 
-bool downloadImage(
-    const char* imagePath,
-    const char* expectedHash
-) {
-    String filename = String(imagePath);
-    filename.replace("images/", "");
+    String filename = words[index].imageFile;
 
-    String target = "/" + filename;
+    String relativePath =
+        "collections/" +
+        String(activeCollection) +
+        "/images/" +
+        filename;
+
+    String url = String(GITHUB_RAW) + relativePath;
+
+    String directory = collectionImagesDirectory();
+
+    if (!ensureDirectory(directory)) {
+        return false;
+    }
+
+    String target = getWordImagePath(index);
     String temp = target + ".tmp";
     String backup = target + ".bak";
 
-    String url = String(GITHUB_RAW) + imagePath;
-
     Serial.println();
-    Serial.print("Descargando: ");
-    Serial.println(imagePath);
+    Serial.print("Descargando imagen: ");
+    Serial.println(filename);
 
     WiFiClientSecure client;
-    client.setInsecure();
-    client.setTimeout(30000);
-
-    HTTPClient http;
-    http.setTimeout(30000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-    if (!http.begin(client, url)) {
-        Serial.println("No se pudo iniciar conexion HTTP");
-        return false;
-    }
-
-    int httpCode = http.GET();
-
-    if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("Error HTTP: %d\n", httpCode);
-        http.end();
-        return false;
-    }
-
-    int contentLength = http.getSize();
-
-    Serial.printf("Tamano esperado: %d bytes\n", contentLength);
-
-    if (contentLength != (int)IMAGE_BYTES) {
-        Serial.println("Tamano de descarga incorrecto");
-        http.end();
-        return false;
-    }
-
-    LittleFS.remove(temp);
-
-    File output = LittleFS.open(temp, "w");
-
-    if (!output) {
-        Serial.println("No se pudo crear archivo temporal");
-        http.end();
-        return false;
-    }
-
-    // HTTPClient gestiona la lectura del flujo.
-    int downloaded = http.writeToStream(&output);
-
-    output.flush();
-    output.close();
-    http.end();
-
-    Serial.printf(
-        "Bytes descargados: %d de %u\n",
-        downloaded,
-        (unsigned int)IMAGE_BYTES
-    );
-
-    if (downloaded != (int)IMAGE_BYTES) {
-        Serial.println("Descarga incompleta");
-        LittleFS.remove(temp);
-        return false;
-    }
-
-    // Verificar SHA-256 del archivo descargado.
-    char downloadedHash[65];
-
-    if (!calculateFileSHA256(
-            temp.c_str(),
-            downloadedHash,
-            sizeof(downloadedHash)
-        )) {
-        Serial.println("No se pudo calcular SHA-256");
-        LittleFS.remove(temp);
-        return false;
-    }
-
-    if (strcmp(downloadedHash, expectedHash) != 0) {
-        Serial.println("ERROR: SHA-256 incorrecto");
-        LittleFS.remove(temp);
-        return false;
-    }
-
-    Serial.println("Imagen descargada y verificada");
-
-    // Sustitucion con copia de seguridad.
-    if (LittleFS.exists(backup)) {
-        LittleFS.remove(backup);
-    }
-
-    if (LittleFS.exists(target)) {
-        if (!LittleFS.rename(target, backup)) {
-            LittleFS.remove(temp);
-            Serial.println("No se pudo crear copia de seguridad");
-            return false;
-        }
-    }
-
-    if (!LittleFS.rename(temp, target)) {
-        if (LittleFS.exists(backup)) {
-            LittleFS.rename(backup, target);
-        }
-
-        Serial.println("Error sustituyendo imagen");
-        return false;
-    }
-
-    if (LittleFS.exists(backup)) {
-        LittleFS.remove(backup);
-    }
-
-    Serial.println("Imagen actualizada correctamente");
-
-    return true;
-}
-
-
-// =====================================
-// COMPROBAR ACTUALIZACIONES EN GITHUB
-// =====================================
-
-
-void updateImagesFromGitHub() {
-
-    if (!wifiConnected ||
-        WiFi.status() != WL_CONNECTED) {
-
-        Serial.println(
-            "Sin Wi-Fi. No se buscan actualizaciones."
-        );
-
-        return;
-    }
-
-    if (!littleFSReady) {
-
-        Serial.println("LittleFS no disponible");
-
-        return;
-    }
-
-    Serial.println();
-    Serial.println("===== BUSCANDO ACTUALIZACIONES =====");
-
-    WiFiClientSecure client;
-
-    // Configuracion temporal para pruebas.
-    // Pendiente de sustituir por validacion TLS.
 
     client.setInsecure();
     client.setTimeout(30000);
@@ -636,265 +1125,177 @@ void updateImagesFromGitHub() {
         HTTPC_STRICT_FOLLOW_REDIRECTS
     );
 
-    Serial.println(
-        "Conectando con GitHub para obtener manifest..."
-    );
-
-    if (!http.begin(client, MANIFEST_URL)) {
-
-        Serial.println(
-            "No se pudo iniciar conexion HTTP con GitHub"
-        );
-
-        return;
+    if (!http.begin(client, url)) {
+        return false;
     }
-
-    Serial.println("Conexion HTTP iniciada");
-
-    Serial.println("Solicitando manifest...");
 
     int httpCode = http.GET();
 
-    Serial.printf(
-        "Respuesta HTTP: %d\n",
-        httpCode
-    );
-
     if (httpCode != HTTP_CODE_OK) {
 
-        Serial.printf(
-            "Error obteniendo manifiesto: %d\n",
-            httpCode
-        );
+        Serial.printf("Error HTTP imagen: %d\n", httpCode);
 
         http.end();
 
-        return;
+        return false;
     }
 
-    Serial.println("Descargando contenido del manifest...");
+    int contentLength = http.getSize();
 
-    String payload = http.getString();
+    if (contentLength != (int)IMAGE_BYTES) {
 
-    Serial.printf(
-        "Manifest recibido: %u bytes\n",
-        (unsigned int)payload.length()
-    );
+        Serial.println("Tamano de imagen incorrecto");
+
+        http.end();
+
+        return false;
+    }
+
+    LittleFS.remove(temp);
+
+    File output = LittleFS.open(temp, "w");
+
+    if (!output) {
+
+        http.end();
+
+        return false;
+    }
+
+    int downloaded = http.writeToStream(&output);
+
+    output.flush();
+    output.close();
 
     http.end();
 
-    StaticJsonDocument<2048> doc;
+    if (downloaded != (int)IMAGE_BYTES) {
 
-    DeserializationError error =
-        deserializeJson(doc, payload);
+        Serial.println("Descarga incompleta");
 
-    if (error) {
+        LittleFS.remove(temp);
 
-        Serial.print("Error leyendo manifiesto: ");
-        Serial.println(error.c_str());
+        return false;
+    }
 
+    // Verificar hash del temporal.
+
+    char downloadedHash[65];
+
+    if (!calculateFileSHA256(
+            temp.c_str(),
+            downloadedHash,
+            sizeof(downloadedHash)
+        )) {
+
+        LittleFS.remove(temp);
+
+        return false;
+    }
+
+    if (strcmp(
+            downloadedHash,
+            words[index].imageHash
+        ) != 0) {
+
+        Serial.println("SHA-256 incorrecto");
+
+        LittleFS.remove(temp);
+
+        return false;
+    }
+
+    // Sustitucion segura.
+
+    LittleFS.remove(backup);
+
+    if (LittleFS.exists(target)) {
+
+        if (!LittleFS.rename(target, backup)) {
+
+            LittleFS.remove(temp);
+
+            return false;
+        }
+    }
+
+    if (!LittleFS.rename(temp, target)) {
+
+        if (LittleFS.exists(backup)) {
+            LittleFS.rename(backup, target);
+        }
+
+        return false;
+    }
+
+    LittleFS.remove(backup);
+
+    Serial.println("Imagen instalada correctamente");
+
+    return true;
+}
+
+// =====================================
+// ACTUALIZAR IMAGENES DE LA COLECCION
+// =====================================
+
+void updateImagesForActiveCollection() {
+
+    if (!collectionLoaded || !littleFSReady) {
         return;
-    }
-
-    const char* version =
-        doc["version"] | "desconocida";
-
-    Serial.print("Version publicada: ");
-    Serial.println(version);
-
-    JsonArray images = doc["images"].as<JsonArray>();
-
-    if (images.isNull() ||
-        images.size() != TOTAL_IMAGES) {
-
-        Serial.println(
-            "Manifiesto incorrecto: numero de imagenes inesperado"
-        );
-
-        return;
-    }
-
-    bool allSuccessful = true;
-    bool seen[TOTAL_IMAGES] = {false};
-
-    for (JsonObject image : images) {
-
-        const char* filename =
-            image["file"] | "";
-
-        const char* path =
-            image["path"] | "";
-
-        const char* expectedHash =
-            image["sha256"] | "";
-
-        size_t size =
-            image["size"] | 0;
-
-        int imageIndex = -1;
-
-        for (int i = 0; i < TOTAL_IMAGES; i++) {
-
-            if (strcmp(filename, IMAGE_FILES[i]) == 0) {
-
-                imageIndex = i;
-                break;
-            }
-        }
-
-        // Validar que la imagen pertenece a la lista permitida.
-
-        if (imageIndex < 0 ||
-            seen[imageIndex] ||
-            strlen(expectedHash) != 64 ||
-            size != IMAGE_BYTES ||
-            String(path) != String("images/") + filename) {
-
-            Serial.println(
-                "Entrada de manifiesto no valida"
-            );
-
-            allSuccessful = false;
-
-            continue;
-        }
-
-        seen[imageIndex] = true;
-
-        // Validar caracteres del SHA-256.
-
-        bool validHash = true;
-
-        for (int i = 0; i < 64; i++) {
-
-            char c = expectedHash[i];
-
-            if (!((c >= '0' && c <= '9') ||
-                  (c >= 'a' && c <= 'f'))) {
-
-                validHash = false;
-                break;
-            }
-        }
-
-        if (!validHash) {
-
-            Serial.println("Hash no valido");
-
-            allSuccessful = false;
-
-            continue;
-        }
-
-        String localPath = "/" + String(filename);
-
-        // =====================================
-        // DIAGNOSTICO DE HASHES
-        // =====================================
-
-        char localHash[65] = {0};
-
-        bool hashCalculated = calculateFileSHA256(
-            localPath.c_str(),
-            localHash,
-            sizeof(localHash)
-        );
-
-        Serial.println();
-        Serial.printf("Imagen: %s\n", filename);
-
-        Serial.printf(
-            "Hash GitHub: %s\n",
-            expectedHash
-        );
-
-        if (hashCalculated) {
-
-            Serial.printf(
-                "Hash local:  %s\n",
-                localHash
-            );
-
-        } else {
-
-            Serial.println(
-                "Hash local: no disponible"
-            );
-        }
-
-        // =====================================
-        // COMPROBAR SI NECESITA ACTUALIZACION
-        // =====================================
-
-        if (hashCalculated &&
-            strcmp(localHash, expectedHash) == 0) {
-
-            Serial.println(
-                "Resultado: imagen ya actualizada"
-            );
-
-            continue;
-        }
-
-        Serial.println(
-            "Resultado: es necesario descargar"
-        );
-
-        // =====================================
-        // DESCARGAR IMAGEN
-        // =====================================
-
-        if (!downloadImage(path, expectedHash)) {
-
-            Serial.println(
-                "ERROR actualizando imagen"
-            );
-
-            allSuccessful = false;
-
-        } else {
-
-            Serial.println(
-                "Descarga y actualizacion completadas"
-            );
-        }
-    }
-
-    // Comprobar que aparecen las seis imagenes.
-
-    for (int i = 0; i < TOTAL_IMAGES; i++) {
-
-        if (!seen[i]) {
-
-            Serial.print(
-                "Falta imagen en manifiesto: "
-            );
-
-            Serial.println(IMAGE_FILES[i]);
-
-            allSuccessful = false;
-        }
     }
 
     Serial.println();
+    Serial.println("===== COMPROBANDO IMAGENES =====");
 
-    if (allSuccessful) {
+    for (int i = 0; i < TOTAL_WORDS; i++) {
 
-        Serial.println(
-            "===== ACTUALIZACION COMPLETADA ====="
-        );
+        words[i].imageAvailable = false;
 
-    } else {
+        if (!words[i].hasImage) {
 
-        Serial.println(
-            "===== ACTUALIZACION PARCIAL O FALLIDA ====="
-        );
+            Serial.print(words[i].id);
+            Serial.println(": sin imagen configurada");
+
+            continue;
+        }
+
+        if (localImageIsValid(i)) {
+
+            words[i].imageAvailable = true;
+
+            Serial.print(words[i].id);
+            Serial.println(": imagen local valida");
+
+            continue;
+        }
+
+        if (!wifiConnected ||
+            WiFi.status() != WL_CONNECTED) {
+
+            Serial.print(words[i].id);
+            Serial.println(": imagen no disponible offline");
+
+            continue;
+        }
+
+        if (downloadImage(i)) {
+
+            words[i].imageAvailable = localImageIsValid(i);
+        }
+
+        if (!words[i].imageAvailable) {
+
+            Serial.print(words[i].id);
+            Serial.println(": se jugara sin imagen");
+        }
     }
+
+    Serial.println("Comprobacion de imagenes finalizada");
 }
 
-
 // =====================================
-// CARGAR IMAGEN DESDE LITTLEFS
+// CARGAR IMAGEN EN BUFFER
 // =====================================
 
 bool loadImage(const char* path) {
@@ -906,17 +1307,10 @@ bool loadImage(const char* path) {
     File file = LittleFS.open(path, "r");
 
     if (!file) {
-
-        Serial.print("No se encuentra imagen: ");
-        Serial.println(path);
-
         return false;
     }
 
     if (file.size() != IMAGE_BYTES) {
-
-        Serial.print("Tamano incorrecto: ");
-        Serial.println(path);
 
         file.close();
 
@@ -948,265 +1342,48 @@ void drawHeader() {
     tft.print("ENGLISH KIDS");
 
     tft.setTextSize(1);
-    tft.setCursor(257, 10);
+    tft.setCursor(265, 10);
 
     tft.print(score);
-    tft.print("/6");
+    tft.print("/");
+    tft.print(TOTAL_WORDS);
 }
 
 // =====================================
-// ILUSTRACIONES
+// DIBUJAR ILUSTRACION
 // =====================================
 
-void drawCharacter(int type) {
+bool drawCharacter(int wordIndex) {
 
-    const char* imagePath = nullptr;
-
-    switch (type) {
-
-        case 0:
-            imagePath = "/ugly.rgb565";
-            break;
-
-        case 1:
-            imagePath = "/beautiful.rgb565";
-            break;
-
-        case 2:
-            imagePath = "/happy.rgb565";
-            break;
-
-        case 3:
-            imagePath = "/sad.rgb565";
-            break;
-
-        case 4:
-            imagePath = "/old.rgb565";
-            break;
-
-        case 5:
-            imagePath = "/young.rgb565";
-            break;
+    if (wordIndex < 0 || wordIndex >= TOTAL_WORDS) {
+        return false;
     }
 
-    if (imagePath != nullptr &&
-        loadImage(imagePath)) {
-
-        tft.drawRGBBitmap(
-            100,
-            70,
-            imageBuffer,
-            IMAGE_WIDTH,
-            IMAGE_HEIGHT
-        );
-
-        return;
+    if (!words[wordIndex].imageAvailable) {
+        return false;
     }
 
-    // =================================
-    // DIBUJO GEOMETRICO DE RESPALDO
-    // =================================
+    String imagePath = getWordImagePath(wordIndex);
 
-    Serial.println("Usando ilustracion geometrica");
+    if (!loadImage(imagePath.c_str())) {
 
-    int cx = 160;
-    int cy = 130;
+        words[wordIndex].imageAvailable = false;
 
-    uint16_t skin = 0xFEA0;
-    uint16_t hair = 0x39E7;
+        Serial.print("No se pudo cargar imagen: ");
+        Serial.println(imagePath);
 
-    tft.fillCircle(cx, cy, 30, 0xDFFB);
-
-    if (type == 4) hair = 0xBDF7;
-    if (type == 5) hair = 0x7BEF;
-    if (type == 0) hair = 0x2104;
-
-    if (type != 4) {
-
-        tft.fillCircle(cx, cy - 24, 21, hair);
-
-        tft.fillRect(
-            cx - 20,
-            cy - 25,
-            40,
-            13,
-            skin
-        );
+        return false;
     }
 
-    tft.fillCircle(cx, cy, 27, skin);
+    tft.drawRGBBitmap(
+        100,
+        70,
+        imageBuffer,
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT
+    );
 
-    tft.fillCircle(cx - 27, cy, 6, skin);
-    tft.fillCircle(cx + 27, cy, 6, skin);
-
-    if (type == 0) {
-
-        tft.fillTriangle(
-            cx - 24, cy - 17,
-            cx - 13, cy - 39,
-            cx - 5, cy - 20,
-            hair
-        );
-
-        tft.fillTriangle(
-            cx + 4, cy - 20,
-            cx + 20, cy - 39,
-            cx + 24, cy - 15,
-            hair
-        );
-    }
-
-    if (type == 1) {
-
-        tft.fillCircle(cx, cy - 25, 20, hair);
-
-        tft.fillRect(
-            cx - 19,
-            cy - 23,
-            38,
-            9,
-            skin
-        );
-    }
-
-    int eyeY = cy - 5;
-
-    if (type == 0) {
-
-        tft.fillCircle(
-            cx - 10,
-            eyeY - 2,
-            4,
-            ILI9341_BLACK
-        );
-
-        tft.fillCircle(
-            cx + 11,
-            eyeY + 2,
-            3,
-            ILI9341_BLACK
-        );
-
-    } else {
-
-        tft.fillCircle(
-            cx - 10,
-            eyeY,
-            3,
-            ILI9341_BLACK
-        );
-
-        tft.fillCircle(
-            cx + 10,
-            eyeY,
-            3,
-            ILI9341_BLACK
-        );
-    }
-
-    if (type == 4) {
-
-        tft.drawCircle(cx - 10, eyeY, 8, DARK_BLUE);
-        tft.drawCircle(cx + 10, eyeY, 8, DARK_BLUE);
-
-        tft.drawLine(
-            cx - 2,
-            eyeY,
-            cx + 2,
-            eyeY,
-            DARK_BLUE
-        );
-
-        tft.drawLine(
-            cx - 20,
-            cy + 7,
-            cx - 12,
-            cy + 9,
-            DARK_BLUE
-        );
-
-        tft.drawLine(
-            cx + 12,
-            cy + 9,
-            cx + 20,
-            cy + 7,
-            DARK_BLUE
-        );
-    }
-
-    if (type == 1 || type == 2 || type == 5) {
-
-        tft.drawLine(
-            cx - 9, cy + 12,
-            cx - 4, cy + 17,
-            ILI9341_RED
-        );
-
-        tft.drawLine(
-            cx - 4, cy + 17,
-            cx + 4, cy + 17,
-            ILI9341_RED
-        );
-
-        tft.drawLine(
-            cx + 4, cy + 17,
-            cx + 9, cy + 12,
-            ILI9341_RED
-        );
-    }
-
-    if (type == 3) {
-
-        tft.drawLine(
-            cx - 9, cy + 17,
-            cx - 4, cy + 12,
-            ILI9341_RED
-        );
-
-        tft.drawLine(
-            cx - 4, cy + 12,
-            cx + 4, cy + 12,
-            ILI9341_RED
-        );
-
-        tft.drawLine(
-            cx + 4, cy + 12,
-            cx + 9, cy + 17,
-            ILI9341_RED
-        );
-    }
-
-    if (type == 0) {
-
-        tft.drawLine(
-            cx - 9, cy + 13,
-            cx, cy + 18,
-            ILI9341_RED
-        );
-
-        tft.drawLine(
-            cx, cy + 18,
-            cx + 9, cy + 11,
-            ILI9341_RED
-        );
-    }
-
-    if (type == 4) {
-
-        tft.drawLine(
-            cx - 7,
-            cy + 15,
-            cx + 7,
-            cy + 15,
-            ILI9341_RED
-        );
-    }
-
-    if (type == 1 || type == 2 || type == 5) {
-
-        tft.fillCircle(cx - 18, cy + 8, 4, 0xF986);
-        tft.fillCircle(cx + 18, cy + 8, 4, 0xF986);
-    }
+    return true;
 }
 
 // =====================================
@@ -1215,6 +1392,7 @@ void drawCharacter(int type) {
 
 void drawOption(
     int x,
+    int y,
     const char* label,
     bool red
 ) {
@@ -1227,21 +1405,32 @@ void drawOption(
 
     tft.fillRoundRect(
         x,
-        193,
+        y,
         142,
         42,
         8,
         bg
     );
 
-    tft.setTextSize(2);
+    // Reducir tamaño si la palabra es larga.
+
+    int textSize = 2;
+
+    if (strlen(label) > 11) {
+        textSize = 1;
+    }
+
+    tft.setTextSize(textSize);
     tft.setTextColor(fg);
 
-    int textWidth = strlen(label) * 12;
+    int textWidth =
+        strlen(label) * 6 * textSize;
 
     int textX = x + (142 - textWidth) / 2;
 
-    tft.setCursor(textX, 207);
+    int textY = y + (42 - 8 * textSize) / 2;
+
+    tft.setCursor(textX, textY);
 
     tft.print(label);
 }
@@ -1251,6 +1440,10 @@ void drawOption(
 // =====================================
 
 void drawQuestion() {
+
+    if (!collectionLoaded || TOTAL_WORDS < 2) {
+        return;
+    }
 
     int wordIndex = questionOrder[currentQuestion];
 
@@ -1285,7 +1478,8 @@ void drawQuestion() {
 
     tft.print("PREGUNTA ");
     tft.print(currentQuestion + 1);
-    tft.print(" DE 6");
+    tft.print(" DE ");
+    tft.print(TOTAL_WORDS);
 
     // Palabra en espanol.
 
@@ -1302,15 +1496,26 @@ void drawQuestion() {
 
     tft.print(words[wordIndex].spanish);
 
-    // Ilustracion.
+    // La imagen es opcional.
+    // Si no existe, las opciones suben.
 
-    drawCharacter(words[wordIndex].illustration);
+    bool hasImage = drawCharacter(wordIndex);
 
-    // Opciones.
+    int optionsY = hasImage ? 193 : 125;
 
-    drawOption(10, words[leftOption].english, true);
+    drawOption(
+        10,
+        optionsY,
+        words[leftOption].english,
+        true
+    );
 
-    drawOption(168, words[rightOption].english, false);
+    drawOption(
+        168,
+        optionsY,
+        words[rightOption].english,
+        false
+    );
 }
 
 // =====================================
@@ -1319,6 +1524,10 @@ void drawQuestion() {
 
 void startGame() {
 
+    if (!collectionLoaded || TOTAL_WORDS < 2) {
+        return;
+    }
+
     score = 0;
     currentQuestion = 0;
     gameFinished = false;
@@ -1326,6 +1535,8 @@ void startGame() {
     for (int i = 0; i < TOTAL_WORDS; i++) {
         questionOrder[i] = i;
     }
+
+    // Barajar sin repetir palabras.
 
     for (int i = TOTAL_WORDS - 1; i > 0; i--) {
 
@@ -1366,7 +1577,9 @@ void nextQuestion() {
 
 void checkAnswer(bool selectedLeft) {
 
-    if (gameFinished) return;
+    if (gameFinished) {
+        return;
+    }
 
     bool correct = (selectedLeft == leftIsCorrect);
 
@@ -1425,16 +1638,41 @@ void drawEndScreen() {
 
     tft.setTextSize(4);
     tft.setTextColor(GREEN);
-    tft.setCursor(125, 145);
+    tft.setCursor(110, 145);
 
     tft.print(score);
-    tft.print("/6");
+    tft.print("/");
+    tft.print(TOTAL_WORDS);
 
     tft.setTextSize(1);
     tft.setTextColor(DARK_BLUE);
     tft.setCursor(55, 210);
 
     tft.print("Pulsa cualquier boton para jugar");
+}
+
+// =====================================
+// PANTALLA DE ERROR
+// =====================================
+
+void drawFatalError() {
+
+    tft.fillScreen(LIGHT_BG);
+
+    tft.setTextColor(ILI9341_RED);
+    tft.setTextSize(2);
+    tft.setCursor(35, 70);
+
+    tft.print("ERROR DE CONTENIDO");
+
+    tft.setTextColor(DARK_BLUE);
+    tft.setTextSize(1);
+    tft.setCursor(30, 110);
+
+    tft.print("No hay una coleccion valida");
+
+    tft.setCursor(30, 130);
+    tft.print("Comprueba Wi-Fi y LittleFS");
 }
 
 // =====================================
@@ -1460,8 +1698,6 @@ void setup() {
         ESP.getPsramSize() / (1024 * 1024)
     );
 
-    Serial.println("=== INICIO SETUP ===");
-
     pinMode(BUTTON_RED, INPUT_PULLUP);
     pinMode(BUTTON_YELLOW, INPUT_PULLUP);
 
@@ -1480,34 +1716,59 @@ void setup() {
 
     randomSeed(esp_random());
 
-    // Conexion Wi-Fi.
+    // 1. Conectar Wi-Fi.
 
     connectWiFi();
 
-    // Sistema de archivos.
+    // 2. Montar LittleFS.
 
     initLittleFS();
 
-    if (littleFSReady) {
+    if (!littleFSReady) {
 
-        // Recuperar imagenes si hubo
-        // una interrupcion durante una actualizacion.
+        drawFatalError();
 
-        recoverImageFiles();
-
-        // Instalar imagenes originales
-        // si todavia no existen.
-
-        installDefaultImages();
-
-        // Comprobar actualizaciones en GitHub.
-
-        updateImagesFromGitHub();
+        return;
     }
 
-    // Iniciar juego.
+    // 3. Cargar primero la ultima coleccion local.
 
-    startGame();
+    bool localLoaded = loadActiveCollectionFromLocal();
+
+    // 4. Intentar actualizar desde GitHub.
+
+    if (wifiConnected) {
+
+        updateCollectionFromGitHub();
+
+        // Volver a cargar la coleccion activa.
+        // Si la descarga fallo, seguira siendo
+        // la ultima configuracion local valida.
+
+        localLoaded = loadActiveCollectionFromLocal();
+    }
+
+    // 5. Comprobar y descargar imagenes.
+
+    if (localLoaded) {
+
+        updateImagesForActiveCollection();
+
+        // Recalcular disponibilidad despues
+        // de las descargas.
+
+        for (int i = 0; i < TOTAL_WORDS; i++) {
+            words[i].imageAvailable = localImageIsValid(i);
+        }
+
+        startGame();
+
+    } else {
+
+        Serial.println("No hay ninguna coleccion valida");
+
+        drawFatalError();
+    }
 
     Serial.println();
     Serial.println("English Kids iniciado");
@@ -1518,6 +1779,11 @@ void setup() {
 // =====================================
 
 void loop() {
+
+    if (!collectionLoaded) {
+        delay(100);
+        return;
+    }
 
     bool redState = digitalRead(BUTTON_RED);
     bool yellowState = digitalRead(BUTTON_YELLOW);
@@ -1531,7 +1797,6 @@ void loop() {
         yellowState == LOW) {
 
         if (bothButtonsPressedAt == 0) {
-
             bothButtonsPressedAt = millis();
         }
 
@@ -1541,21 +1806,34 @@ void loop() {
             updateCombinationHandled = true;
 
             Serial.println();
-            Serial.println(
-                "Actualizacion manual solicitada"
-            );
+            Serial.println("Actualizacion manual solicitada");
 
-            updateImagesFromGitHub();
+            bool updated = updateCollectionFromGitHub();
 
-            // Volver a mostrar la pantalla actual.
+            if (updated) {
 
-            if (gameFinished) {
+                if (loadActiveCollectionFromLocal()) {
 
-                drawEndScreen();
+                    updateImagesForActiveCollection();
+
+                    for (int i = 0; i < TOTAL_WORDS; i++) {
+                        words[i].imageAvailable =
+                            localImageIsValid(i);
+                    }
+
+                    startGame();
+                }
 
             } else {
 
-                drawQuestion();
+                // No se ha activado ninguna coleccion nueva.
+                // Se conserva la partida actual.
+
+                if (gameFinished) {
+                    drawEndScreen();
+                } else {
+                    drawQuestion();
+                }
             }
         }
 
@@ -1565,10 +1843,7 @@ void loop() {
         return;
     }
 
-    // Reiniciar deteccion de combinacion.
-
     bothButtonsPressedAt = 0;
-
     updateCombinationHandled = false;
 
     // =================================
@@ -1583,11 +1858,8 @@ void loop() {
             lastPress = millis();
 
             if (gameFinished) {
-
                 startGame();
-
             } else {
-
                 checkAnswer(true);
             }
         }
@@ -1598,11 +1870,8 @@ void loop() {
             lastPress = millis();
 
             if (gameFinished) {
-
                 startGame();
-
             } else {
-
                 checkAnswer(false);
             }
         }

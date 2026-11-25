@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "images": [
     {
       "file": "ugly.rgb565",
@@ -17,7 +17,7 @@
       "file": "happy.rgb565",
       "path": "images/happy.rgb565",
       "size": 28800,
-      "sha256": "be085c070aae80ffb117020e6fe2f69901646cc3b5fd3c8a738ab2e5c32c1a51"
+      "sha256": "d0c88d1d4d0d3304e1548a27487dec262294886f5f692a7ac86f3f640e927e66"
     },
     {
       "file": "sad.rgb565",

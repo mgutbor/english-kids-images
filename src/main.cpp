@@ -4,10 +4,16 @@
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
 #include <LittleFS.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <mbedtls/sha256.h>
 #include <string.h>
 
+// Credenciales Wi-Fi
 #include "secrets.h"
 
+// Imagenes originales de respaldo
 #include "ugly.h"
 #include "beautiful.h"
 #include "happy.h"
@@ -22,9 +28,9 @@
 #define TFT_CS    4
 #define TFT_RST   1
 #define TFT_DC    2
-#define TFT_MOSI 11
-#define TFT_SCK  12
-#define TFT_MISO 13
+#define TFT_MOSI  11
+#define TFT_SCK   12
+#define TFT_MISO  13
 
 #define BUTTON_RED     6
 #define BUTTON_YELLOW  7
@@ -48,6 +54,30 @@ bool wifiConnected = false;
 bool littleFSReady = false;
 
 // =====================================
+// ACTUALIZACIONES GITHUB
+// =====================================
+
+const char* MANIFEST_URL =
+    "https://raw.githubusercontent.com/mgutbor/english-kids-images/main/version.json";
+
+const char* GITHUB_RAW =
+    "https://raw.githubusercontent.com/mgutbor/english-kids-images/main/";
+
+const char* IMAGE_FILES[] = {
+    "ugly.rgb565",
+    "beautiful.rgb565",
+    "happy.rgb565",
+    "sad.rgb565",
+    "old.rgb565",
+    "young.rgb565"
+};
+
+const int TOTAL_IMAGES = 6;
+
+unsigned long bothButtonsPressedAt = 0;
+bool updateCombinationHandled = false;
+
+// =====================================
 // IMAGENES
 // =====================================
 
@@ -57,7 +87,6 @@ bool littleFSReady = false;
 const size_t IMAGE_BYTES =
     IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(uint16_t);
 
-// Buffer para cargar una imagen desde LittleFS.
 uint16_t imageBuffer[IMAGE_WIDTH * IMAGE_HEIGHT];
 
 // =====================================
@@ -102,6 +131,8 @@ const unsigned long debounceDelay = 180;
 // =====================================
 
 void drawEndScreen();
+void drawQuestion();
+void updateImagesFromGitHub();
 
 // =====================================
 // CONEXION WIFI
@@ -151,27 +182,82 @@ void connectWiFi() {
 // =====================================
 
 void initLittleFS() {
+
     Serial.println("\n===== INICIALIZANDO LITTLEFS =====");
 
     littleFSReady = LittleFS.begin(false);
 
     if (!littleFSReady) {
+
         Serial.println("LittleFS no monta. Intentando formatear...");
 
         if (LittleFS.format()) {
+
             Serial.println("Formateo correcto.");
+
             littleFSReady = LittleFS.begin(false);
+
         } else {
+
             Serial.println("ERROR: No se pudo formatear LittleFS.");
         }
     }
 
     if (littleFSReady) {
+
         Serial.println("LittleFS montado correctamente.");
-        Serial.printf("Total: %u bytes\n", LittleFS.totalBytes());
-        Serial.printf("Usado: %u bytes\n", LittleFS.usedBytes());
+
+        Serial.printf(
+            "Total: %u bytes\n",
+            LittleFS.totalBytes()
+        );
+
+        Serial.printf(
+            "Usado: %u bytes\n",
+            LittleFS.usedBytes()
+        );
+
     } else {
+
         Serial.println("ERROR: LittleFS sigue sin estar disponible.");
+    }
+}
+
+// =====================================
+// RECUPERACION DE ARCHIVOS TEMPORALES
+// =====================================
+
+void recoverImageFiles() {
+
+    Serial.println("\nComprobando archivos temporales...");
+
+    for (int i = 0; i < TOTAL_IMAGES; i++) {
+
+        String target = "/" + String(IMAGE_FILES[i]);
+        String backup = target + ".bak";
+        String temp = target + ".tmp";
+
+        // Si no existe la imagen original,
+        // recuperamos la copia de seguridad.
+
+        if (!LittleFS.exists(target) &&
+            LittleFS.exists(backup)) {
+
+            Serial.println("Recuperando copia de seguridad");
+
+            LittleFS.rename(backup, target);
+
+        } else if (LittleFS.exists(target) &&
+                   LittleFS.exists(backup)) {
+
+            LittleFS.remove(backup);
+        }
+
+        // Eliminar descargas incompletas.
+
+        if (LittleFS.exists(temp)) {
+            LittleFS.remove(temp);
+        }
     }
 }
 
@@ -184,8 +270,6 @@ bool saveImageIfNeeded(
     const uint16_t* bitmap
 ) {
 
-    // Comprobar si ya existe y tiene el tamaño correcto.
-
     if (LittleFS.exists(path)) {
 
         File existingFile = LittleFS.open(path, "r");
@@ -197,8 +281,10 @@ bool saveImageIfNeeded(
             existingFile.close();
 
             if (validSize) {
+
                 Serial.print("Imagen ya instalada: ");
                 Serial.println(path);
+
                 return true;
             }
         }
@@ -210,7 +296,9 @@ bool saveImageIfNeeded(
     File file = LittleFS.open(path, "w");
 
     if (!file) {
+
         Serial.println("Error creando archivo");
+
         return false;
     }
 
@@ -222,7 +310,9 @@ bool saveImageIfNeeded(
     file.close();
 
     if (written != IMAGE_BYTES) {
+
         Serial.println("Error escribiendo imagen");
+
         return false;
     }
 
@@ -238,7 +328,9 @@ bool saveImageIfNeeded(
 void installDefaultImages() {
 
     if (!littleFSReady) {
+
         Serial.println("LittleFS no disponible");
+
         return;
     }
 
@@ -256,6 +348,560 @@ void installDefaultImages() {
 }
 
 // =====================================
+// CALCULAR SHA-256 DE UN ARCHIVO
+// =====================================
+
+bool calculateFileSHA256(
+    const char* path,
+    char* output,
+    size_t outputSize
+) {
+
+    if (outputSize < 65) {
+        return false;
+    }
+
+    File file = LittleFS.open(path, "r");
+
+    if (!file) {
+        return false;
+    }
+
+    mbedtls_sha256_context ctx;
+
+    mbedtls_sha256_init(&ctx);
+
+    bool success =
+        mbedtls_sha256_starts(&ctx, 0) == 0;
+
+    uint8_t buffer[1024];
+
+    while (success && file.available()) {
+
+        size_t bytesRead = file.read(
+            buffer,
+            sizeof(buffer)
+        );
+
+        if (bytesRead == 0) {
+
+            success = false;
+            break;
+        }
+
+        success =
+            mbedtls_sha256_update(
+                &ctx,
+                buffer,
+                bytesRead
+            ) == 0;
+    }
+
+    uint8_t hash[32] = {0};
+
+    if (success) {
+
+        success =
+            mbedtls_sha256_finish(
+                &ctx,
+                hash
+            ) == 0;
+    }
+
+    mbedtls_sha256_free(&ctx);
+
+    file.close();
+
+    if (!success) {
+        return false;
+    }
+
+    for (int i = 0; i < 32; i++) {
+
+        sprintf(
+            output + (i * 2),
+            "%02x",
+            hash[i]
+        );
+    }
+
+    output[64] = '\0';
+
+    return true;
+}
+
+// =====================================
+// COMPROBAR SI UNA IMAGEN NECESITA UPDATE
+// =====================================
+
+bool imageNeedsUpdate(
+    const char* path,
+    const char* expectedHash
+) {
+
+    char localHash[65];
+
+    if (!LittleFS.exists(path)) {
+        return true;
+    }
+
+    if (!calculateFileSHA256(
+            path,
+            localHash,
+            sizeof(localHash)
+        )) {
+
+        return true;
+    }
+
+    return strcmp(localHash, expectedHash) != 0;
+}
+
+// =====================================
+// DESCARGAR Y SUSTITUIR UNA IMAGEN
+// =====================================
+
+bool downloadImage(
+    const char* imagePath,
+    const char* expectedHash
+) {
+
+    String target = "/" + String(imagePath);
+    String temp = target + ".tmp";
+    String backup = target + ".bak";
+
+    String url = String(GITHUB_RAW) + imagePath;
+
+    Serial.println();
+    Serial.print("Descargando: ");
+    Serial.println(imagePath);
+
+    WiFiClientSecure client;
+
+    // Configuracion temporal para pruebas.
+    // Pendiente de sustituir por validacion TLS.
+
+    client.setInsecure();
+    client.setTimeout(15000);
+
+    HTTPClient http;
+
+    http.setTimeout(15000);
+
+    http.setFollowRedirects(
+        HTTPC_STRICT_FOLLOW_REDIRECTS
+    );
+
+    if (!http.begin(client, url)) {
+
+        Serial.println("No se pudo iniciar conexion HTTP");
+
+        return false;
+    }
+
+    int httpCode = http.GET();
+
+    if (httpCode != HTTP_CODE_OK) {
+
+        Serial.printf("Error HTTP: %d\n", httpCode);
+
+        http.end();
+
+        return false;
+    }
+
+    int contentLength = http.getSize();
+
+    if (contentLength != (int)IMAGE_BYTES) {
+
+        Serial.println("Tamano de descarga incorrecto");
+
+        http.end();
+
+        return false;
+    }
+
+    File output = LittleFS.open(temp, "w");
+
+    if (!output) {
+
+        Serial.println("No se pudo crear archivo temporal");
+
+        http.end();
+
+        return false;
+    }
+
+    mbedtls_sha256_context ctx;
+
+    mbedtls_sha256_init(&ctx);
+
+    bool success =
+        mbedtls_sha256_starts(&ctx, 0) == 0;
+
+    uint8_t buffer[1024];
+
+    size_t totalWritten = 0;
+
+    Stream* stream = http.getStreamPtr();
+
+    while (success && totalWritten < IMAGE_BYTES) {
+
+        size_t remaining = IMAGE_BYTES - totalWritten;
+
+        size_t requested = min(
+            remaining,
+            sizeof(buffer)
+        );
+
+        size_t received = stream->readBytes(
+            buffer,
+            requested
+        );
+
+        if (received == 0) {
+
+            success = false;
+            break;
+        }
+
+        size_t written = output.write(
+            buffer,
+            received
+        );
+
+        if (written != received) {
+
+            success = false;
+            break;
+        }
+
+        if (mbedtls_sha256_update(
+                &ctx,
+                buffer,
+                received
+            ) != 0) {
+
+            success = false;
+            break;
+        }
+
+        totalWritten += received;
+    }
+
+    uint8_t hash[32] = {0};
+
+    if (success) {
+
+        success =
+            mbedtls_sha256_finish(
+                &ctx,
+                hash
+            ) == 0;
+    }
+
+    mbedtls_sha256_free(&ctx);
+
+    output.close();
+
+    http.end();
+
+    if (!success || totalWritten != IMAGE_BYTES) {
+
+        Serial.println("Descarga incompleta");
+
+        LittleFS.remove(temp);
+
+        return false;
+    }
+
+    char downloadedHash[65];
+
+    for (int i = 0; i < 32; i++) {
+
+        sprintf(
+            downloadedHash + (i * 2),
+            "%02x",
+            hash[i]
+        );
+    }
+
+    downloadedHash[64] = '\0';
+
+    if (strcmp(downloadedHash, expectedHash) != 0) {
+
+        Serial.println("ERROR: SHA-256 incorrecto");
+
+        LittleFS.remove(temp);
+
+        return false;
+    }
+
+    Serial.println("Imagen descargada y verificada");
+
+    // =================================
+    // SUSTITUCION CON COPIA DE SEGURIDAD
+    // =================================
+
+    if (LittleFS.exists(backup)) {
+        LittleFS.remove(backup);
+    }
+
+    if (LittleFS.exists(target)) {
+
+        if (!LittleFS.rename(target, backup)) {
+
+            LittleFS.remove(temp);
+
+            Serial.println(
+                "No se pudo crear copia de seguridad"
+            );
+
+            return false;
+        }
+    }
+
+    if (!LittleFS.rename(temp, target)) {
+
+        if (LittleFS.exists(backup)) {
+            LittleFS.rename(backup, target);
+        }
+
+        Serial.println("Error sustituyendo imagen");
+
+        return false;
+    }
+
+    if (LittleFS.exists(backup)) {
+        LittleFS.remove(backup);
+    }
+
+    Serial.println("Imagen actualizada correctamente");
+
+    return true;
+}
+
+// =====================================
+// COMPROBAR ACTUALIZACIONES EN GITHUB
+// =====================================
+
+void updateImagesFromGitHub() {
+
+    if (!wifiConnected ||
+        WiFi.status() != WL_CONNECTED) {
+
+        Serial.println(
+            "Sin Wi-Fi. No se buscan actualizaciones."
+        );
+
+        return;
+    }
+
+    if (!littleFSReady) {
+
+        Serial.println("LittleFS no disponible");
+
+        return;
+    }
+
+    Serial.println();
+    Serial.println("===== BUSCANDO ACTUALIZACIONES =====");
+
+    WiFiClientSecure client;
+
+    // Configuracion temporal para pruebas.
+    // Pendiente de sustituir por validacion TLS.
+
+    client.setInsecure();
+    client.setTimeout(15000);
+
+    HTTPClient http;
+
+    http.setTimeout(15000);
+
+    http.setFollowRedirects(
+        HTTPC_STRICT_FOLLOW_REDIRECTS
+    );
+
+    if (!http.begin(client, MANIFEST_URL)) {
+
+        Serial.println("No se pudo conectar con GitHub");
+
+        return;
+    }
+
+    int httpCode = http.GET();
+
+    if (httpCode != HTTP_CODE_OK) {
+
+        Serial.printf(
+            "Error obteniendo manifiesto: %d\n",
+            httpCode
+        );
+
+        http.end();
+
+        return;
+    }
+
+    String payload = http.getString();
+
+    http.end();
+
+    StaticJsonDocument<2048> doc;
+
+    DeserializationError error =
+        deserializeJson(doc, payload);
+
+    if (error) {
+
+        Serial.print("Error leyendo manifiesto: ");
+        Serial.println(error.c_str());
+
+        return;
+    }
+
+    const char* version =
+        doc["version"] | "desconocida";
+
+    Serial.print("Version publicada: ");
+    Serial.println(version);
+
+    JsonArray images = doc["images"].as<JsonArray>();
+
+    if (images.isNull() ||
+        images.size() != TOTAL_IMAGES) {
+
+        Serial.println(
+            "Manifiesto incorrecto: numero de imagenes inesperado"
+        );
+
+        return;
+    }
+
+    bool allSuccessful = true;
+    bool seen[TOTAL_IMAGES] = {false};
+
+    for (JsonObject image : images) {
+
+        const char* filename =
+            image["file"] | "";
+
+        const char* path =
+            image["path"] | "";
+
+        const char* expectedHash =
+            image["sha256"] | "";
+
+        size_t size =
+            image["size"] | 0;
+
+        int imageIndex = -1;
+
+        for (int i = 0; i < TOTAL_IMAGES; i++) {
+
+            if (strcmp(filename, IMAGE_FILES[i]) == 0) {
+
+                imageIndex = i;
+                break;
+            }
+        }
+
+        // Comprobar que la entrada pertenece
+        // a una de las seis imagenes permitidas.
+
+        if (imageIndex < 0 ||
+            seen[imageIndex] ||
+            strlen(expectedHash) != 64 ||
+            size != IMAGE_BYTES ||
+            String(path) != String("images/") + filename) {
+
+            Serial.println(
+                "Entrada de manifiesto no valida"
+            );
+
+            allSuccessful = false;
+
+            continue;
+        }
+
+        seen[imageIndex] = true;
+
+        // Comprobar que el hash contiene
+        // exclusivamente caracteres hexadecimales.
+
+        bool validHash = true;
+
+        for (int i = 0; i < 64; i++) {
+
+            char c = expectedHash[i];
+
+            if (!((c >= '0' && c <= '9') ||
+                  (c >= 'a' && c <= 'f'))) {
+
+                validHash = false;
+                break;
+            }
+        }
+
+        if (!validHash) {
+
+            Serial.println("Hash no valido");
+
+            allSuccessful = false;
+
+            continue;
+        }
+
+        String localPath = "/" + String(filename);
+
+        if (!imageNeedsUpdate(
+                localPath.c_str(),
+                expectedHash
+            )) {
+
+            Serial.print("Imagen actualizada: ");
+            Serial.println(filename);
+
+            continue;
+        }
+
+        if (!downloadImage(path, expectedHash)) {
+
+            allSuccessful = false;
+        }
+    }
+
+    // Comprobar que estan presentes las seis imagenes.
+
+    for (int i = 0; i < TOTAL_IMAGES; i++) {
+
+        if (!seen[i]) {
+
+            Serial.print("Falta imagen en manifiesto: ");
+            Serial.println(IMAGE_FILES[i]);
+
+            allSuccessful = false;
+        }
+    }
+
+    Serial.println();
+
+    if (allSuccessful) {
+
+        Serial.println(
+            "===== ACTUALIZACION COMPLETADA ====="
+        );
+
+    } else {
+
+        Serial.println(
+            "===== ACTUALIZACION PARCIAL O FALLIDA ====="
+        );
+    }
+}
+
+// =====================================
 // CARGAR IMAGEN DESDE LITTLEFS
 // =====================================
 
@@ -268,15 +914,20 @@ bool loadImage(const char* path) {
     File file = LittleFS.open(path, "r");
 
     if (!file) {
+
         Serial.print("No se encuentra imagen: ");
         Serial.println(path);
+
         return false;
     }
 
     if (file.size() != IMAGE_BYTES) {
+
         Serial.print("Tamano incorrecto: ");
         Serial.println(path);
+
         file.close();
+
         return false;
     }
 
@@ -301,10 +952,12 @@ void drawHeader() {
     tft.setTextColor(ILI9341_WHITE);
     tft.setTextSize(2);
     tft.setCursor(9, 7);
+
     tft.print("ENGLISH KIDS");
 
     tft.setTextSize(1);
     tft.setCursor(257, 10);
+
     tft.print(score);
     tft.print("/6");
 }
@@ -344,9 +997,8 @@ void drawCharacter(int type) {
             break;
     }
 
-    // Intentar cargar y dibujar desde LittleFS.
-
-    if (imagePath != nullptr && loadImage(imagePath)) {
+    if (imagePath != nullptr &&
+        loadImage(imagePath)) {
 
         tft.drawRGBBitmap(
             100,
@@ -378,8 +1030,16 @@ void drawCharacter(int type) {
     if (type == 0) hair = 0x2104;
 
     if (type != 4) {
+
         tft.fillCircle(cx, cy - 24, 21, hair);
-        tft.fillRect(cx - 20, cy - 25, 40, 13, skin);
+
+        tft.fillRect(
+            cx - 20,
+            cy - 25,
+            40,
+            13,
+            skin
+        );
     }
 
     tft.fillCircle(cx, cy, 27, skin);
@@ -388,61 +1048,170 @@ void drawCharacter(int type) {
     tft.fillCircle(cx + 27, cy, 6, skin);
 
     if (type == 0) {
-        tft.fillTriangle(cx - 24, cy - 17,
-                         cx - 13, cy - 39,
-                         cx - 5, cy - 20, hair);
 
-        tft.fillTriangle(cx + 4, cy - 20,
-                         cx + 20, cy - 39,
-                         cx + 24, cy - 15, hair);
+        tft.fillTriangle(
+            cx - 24, cy - 17,
+            cx - 13, cy - 39,
+            cx - 5, cy - 20,
+            hair
+        );
+
+        tft.fillTriangle(
+            cx + 4, cy - 20,
+            cx + 20, cy - 39,
+            cx + 24, cy - 15,
+            hair
+        );
     }
 
     if (type == 1) {
+
         tft.fillCircle(cx, cy - 25, 20, hair);
-        tft.fillRect(cx - 19, cy - 23, 38, 9, skin);
+
+        tft.fillRect(
+            cx - 19,
+            cy - 23,
+            38,
+            9,
+            skin
+        );
     }
 
     int eyeY = cy - 5;
 
     if (type == 0) {
-        tft.fillCircle(cx - 10, eyeY - 2, 4, ILI9341_BLACK);
-        tft.fillCircle(cx + 11, eyeY + 2, 3, ILI9341_BLACK);
+
+        tft.fillCircle(
+            cx - 10,
+            eyeY - 2,
+            4,
+            ILI9341_BLACK
+        );
+
+        tft.fillCircle(
+            cx + 11,
+            eyeY + 2,
+            3,
+            ILI9341_BLACK
+        );
+
     } else {
-        tft.fillCircle(cx - 10, eyeY, 3, ILI9341_BLACK);
-        tft.fillCircle(cx + 10, eyeY, 3, ILI9341_BLACK);
+
+        tft.fillCircle(
+            cx - 10,
+            eyeY,
+            3,
+            ILI9341_BLACK
+        );
+
+        tft.fillCircle(
+            cx + 10,
+            eyeY,
+            3,
+            ILI9341_BLACK
+        );
     }
 
     if (type == 4) {
+
         tft.drawCircle(cx - 10, eyeY, 8, DARK_BLUE);
         tft.drawCircle(cx + 10, eyeY, 8, DARK_BLUE);
-        tft.drawLine(cx - 2, eyeY, cx + 2, eyeY, DARK_BLUE);
 
-        tft.drawLine(cx - 20, cy + 7, cx - 12, cy + 9, DARK_BLUE);
-        tft.drawLine(cx + 12, cy + 9, cx + 20, cy + 7, DARK_BLUE);
+        tft.drawLine(
+            cx - 2,
+            eyeY,
+            cx + 2,
+            eyeY,
+            DARK_BLUE
+        );
+
+        tft.drawLine(
+            cx - 20,
+            cy + 7,
+            cx - 12,
+            cy + 9,
+            DARK_BLUE
+        );
+
+        tft.drawLine(
+            cx + 12,
+            cy + 9,
+            cx + 20,
+            cy + 7,
+            DARK_BLUE
+        );
     }
 
     if (type == 1 || type == 2 || type == 5) {
-        tft.drawLine(cx - 9, cy + 12, cx - 4, cy + 17, ILI9341_RED);
-        tft.drawLine(cx - 4, cy + 17, cx + 4, cy + 17, ILI9341_RED);
-        tft.drawLine(cx + 4, cy + 17, cx + 9, cy + 12, ILI9341_RED);
+
+        tft.drawLine(
+            cx - 9, cy + 12,
+            cx - 4, cy + 17,
+            ILI9341_RED
+        );
+
+        tft.drawLine(
+            cx - 4, cy + 17,
+            cx + 4, cy + 17,
+            ILI9341_RED
+        );
+
+        tft.drawLine(
+            cx + 4, cy + 17,
+            cx + 9, cy + 12,
+            ILI9341_RED
+        );
     }
 
     if (type == 3) {
-        tft.drawLine(cx - 9, cy + 17, cx - 4, cy + 12, ILI9341_RED);
-        tft.drawLine(cx - 4, cy + 12, cx + 4, cy + 12, ILI9341_RED);
-        tft.drawLine(cx + 4, cy + 12, cx + 9, cy + 17, ILI9341_RED);
+
+        tft.drawLine(
+            cx - 9, cy + 17,
+            cx - 4, cy + 12,
+            ILI9341_RED
+        );
+
+        tft.drawLine(
+            cx - 4, cy + 12,
+            cx + 4, cy + 12,
+            ILI9341_RED
+        );
+
+        tft.drawLine(
+            cx + 4, cy + 12,
+            cx + 9, cy + 17,
+            ILI9341_RED
+        );
     }
 
     if (type == 0) {
-        tft.drawLine(cx - 9, cy + 13, cx, cy + 18, ILI9341_RED);
-        tft.drawLine(cx, cy + 18, cx + 9, cy + 11, ILI9341_RED);
+
+        tft.drawLine(
+            cx - 9, cy + 13,
+            cx, cy + 18,
+            ILI9341_RED
+        );
+
+        tft.drawLine(
+            cx, cy + 18,
+            cx + 9, cy + 11,
+            ILI9341_RED
+        );
     }
 
     if (type == 4) {
-        tft.drawLine(cx - 7, cy + 15, cx + 7, cy + 15, ILI9341_RED);
+
+        tft.drawLine(
+            cx - 7,
+            cy + 15,
+            cx + 7,
+            cy + 15,
+            ILI9341_RED
+        );
     }
 
     if (type == 1 || type == 2 || type == 5) {
+
         tft.fillCircle(cx - 18, cy + 8, 4, 0xF986);
         tft.fillCircle(cx + 18, cy + 8, 4, 0xF986);
     }
@@ -452,20 +1221,36 @@ void drawCharacter(int type) {
 // DIBUJAR OPCION
 // =====================================
 
-void drawOption(int x, const char* label, bool red) {
+void drawOption(
+    int x,
+    const char* label,
+    bool red
+) {
 
-    uint16_t bg = red ? ILI9341_RED : ILI9341_YELLOW;
-    uint16_t fg = red ? ILI9341_WHITE : ILI9341_BLACK;
+    uint16_t bg =
+        red ? ILI9341_RED : ILI9341_YELLOW;
 
-    tft.fillRoundRect(x, 193, 142, 42, 8, bg);
+    uint16_t fg =
+        red ? ILI9341_WHITE : ILI9341_BLACK;
+
+    tft.fillRoundRect(
+        x,
+        193,
+        142,
+        42,
+        8,
+        bg
+    );
 
     tft.setTextSize(2);
     tft.setTextColor(fg);
 
     int textWidth = strlen(label) * 12;
+
     int textX = x + (142 - textWidth) / 2;
 
     tft.setCursor(textX, 207);
+
     tft.print(label);
 }
 
@@ -480,15 +1265,20 @@ void drawQuestion() {
     int wrongIndex;
 
     do {
+
         wrongIndex = random(TOTAL_WORDS);
+
     } while (wrongIndex == wordIndex);
 
     leftIsCorrect = random(2) == 0;
 
     if (leftIsCorrect) {
+
         leftOption = wordIndex;
         rightOption = wrongIndex;
+
     } else {
+
         leftOption = wrongIndex;
         rightOption = wordIndex;
     }
@@ -505,23 +1295,29 @@ void drawQuestion() {
     tft.print(currentQuestion + 1);
     tft.print(" DE 6");
 
-    // Palabra en español.
+    // Palabra en espanol.
 
     tft.setTextColor(ILI9341_BLACK);
     tft.setTextSize(2);
 
-    int wordWidth = strlen(words[wordIndex].spanish) * 12;
+    int wordWidth =
+        strlen(words[wordIndex].spanish) * 12;
 
-    tft.setCursor((320 - wordWidth) / 2, 49);
+    tft.setCursor(
+        (320 - wordWidth) / 2,
+        49
+    );
+
     tft.print(words[wordIndex].spanish);
 
-    // Ilustración.
+    // Ilustracion.
 
     drawCharacter(words[wordIndex].illustration);
 
     // Opciones.
 
     drawOption(10, words[leftOption].english, true);
+
     drawOption(168, words[rightOption].english, false);
 }
 
@@ -544,6 +1340,7 @@ void startGame() {
         int j = random(i + 1);
 
         int temp = questionOrder[i];
+
         questionOrder[i] = questionOrder[j];
         questionOrder[j] = temp;
     }
@@ -562,6 +1359,7 @@ void nextQuestion() {
     if (currentQuestion >= TOTAL_WORDS) {
 
         gameFinished = true;
+
         drawEndScreen();
 
         return;
@@ -584,7 +1382,13 @@ void checkAnswer(bool selectedLeft) {
         score++;
     }
 
-    tft.fillRect(0, 29, 320, 19, LIGHT_BG);
+    tft.fillRect(
+        0,
+        29,
+        320,
+        19,
+        LIGHT_BG
+    );
 
     tft.setTextSize(2);
     tft.setCursor(90, 31);
@@ -618,22 +1422,26 @@ void drawEndScreen() {
     tft.setTextColor(DARK_BLUE);
     tft.setTextSize(3);
     tft.setCursor(62, 55);
+
     tft.print("FIN DEL JUEGO");
 
     tft.setTextSize(2);
     tft.setTextColor(ILI9341_BLACK);
     tft.setCursor(75, 110);
+
     tft.print("RESULTADO");
 
     tft.setTextSize(4);
     tft.setTextColor(GREEN);
     tft.setCursor(125, 145);
+
     tft.print(score);
     tft.print("/6");
 
     tft.setTextSize(1);
     tft.setTextColor(DARK_BLUE);
     tft.setCursor(55, 210);
+
     tft.print("Pulsa cualquier boton para jugar");
 }
 
@@ -642,26 +1450,38 @@ void drawEndScreen() {
 // =====================================
 
 void setup() {
+
     Serial.begin(115200);
+
     delay(1500);
 
     Serial.println();
     Serial.println("=== ENGLISH KIDS ARRANCANDO ===");
 
-    Serial.printf("Flash: %u MB\n",
-                  ESP.getFlashChipSize() / (1024 * 1024));
+    Serial.printf(
+        "Flash: %u MB\n",
+        ESP.getFlashChipSize() / (1024 * 1024)
+    );
 
-    Serial.printf("PSRAM: %u MB\n",
-                  ESP.getPsramSize() / (1024 * 1024));
+    Serial.printf(
+        "PSRAM: %u MB\n",
+        ESP.getPsramSize() / (1024 * 1024)
+    );
 
     Serial.println("=== INICIO SETUP ===");
 
     pinMode(BUTTON_RED, INPUT_PULLUP);
     pinMode(BUTTON_YELLOW, INPUT_PULLUP);
 
-    SPI.begin(TFT_SCK, TFT_MISO, TFT_MOSI, TFT_CS);
+    SPI.begin(
+        TFT_SCK,
+        TFT_MISO,
+        TFT_MOSI,
+        TFT_CS
+    );
 
     tft.begin();
+
     tft.setRotation(1);
 
     tft.fillScreen(ILI9341_BLACK);
@@ -676,9 +1496,22 @@ void setup() {
 
     initLittleFS();
 
-    // Copiar imagenes si todavia no estan instaladas.
+    if (littleFSReady) {
 
-    installDefaultImages();
+        // Recuperar imagenes si hubo
+        // una interrupcion durante una actualizacion.
+
+        recoverImageFiles();
+
+        // Instalar imagenes originales
+        // si todavia no existen.
+
+        installDefaultImages();
+
+        // Comprobar actualizaciones en GitHub.
+
+        updateImagesFromGitHub();
+    }
 
     // Iniciar juego.
 
@@ -697,26 +1530,87 @@ void loop() {
     bool redState = digitalRead(BUTTON_RED);
     bool yellowState = digitalRead(BUTTON_YELLOW);
 
+    // =================================
+    // ACTUALIZACION MANUAL
+    // Ambos botones durante 2 segundos.
+    // =================================
+
+    if (redState == LOW &&
+        yellowState == LOW) {
+
+        if (bothButtonsPressedAt == 0) {
+
+            bothButtonsPressedAt = millis();
+        }
+
+        if (!updateCombinationHandled &&
+            millis() - bothButtonsPressedAt >= 2000) {
+
+            updateCombinationHandled = true;
+
+            Serial.println();
+            Serial.println(
+                "Actualizacion manual solicitada"
+            );
+
+            updateImagesFromGitHub();
+
+            // Volver a mostrar la pantalla actual.
+
+            if (gameFinished) {
+
+                drawEndScreen();
+
+            } else {
+
+                drawQuestion();
+            }
+        }
+
+        lastRedState = redState;
+        lastYellowState = yellowState;
+
+        return;
+    }
+
+    // Reiniciar deteccion de combinacion.
+
+    bothButtonsPressedAt = 0;
+
+    updateCombinationHandled = false;
+
+    // =================================
+    // FUNCIONAMIENTO NORMAL DEL JUEGO
+    // =================================
+
     if (millis() - lastPress >= debounceDelay) {
 
-        if (redState == LOW && lastRedState == HIGH) {
+        if (redState == LOW &&
+            lastRedState == HIGH) {
 
             lastPress = millis();
 
             if (gameFinished) {
+
                 startGame();
+
             } else {
+
                 checkAnswer(true);
             }
         }
 
-        else if (yellowState == LOW && lastYellowState == HIGH) {
+        else if (yellowState == LOW &&
+                 lastYellowState == HIGH) {
 
             lastPress = millis();
 
             if (gameFinished) {
+
                 startGame();
+
             } else {
+
                 checkAnswer(false);
             }
         }

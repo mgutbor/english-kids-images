@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "title": "Adjetivos básicos",
+  "words": [
+    {
+      "id": "ugly",
+      "spanish": "FEO",
+      "english": "UGLY",
+      "image": {
+        "file": "ugly.rgb565",
+        "size": 28800,
+        "sha256": "bcfdbc42a8a3554c43ef90ae2b2ef57af9d94388891fed9adf5f0d4863e1fc3f",
+        "available": true
+      }
+    },
+    {
+      "id": "beautiful",
+      "spanish": "GUAPO",
+      "english": "BEAUTIFUL",
+      "image": {
+        "file": "beautiful.rgb565",
+        "size": 28800,
+        "sha256": "ad7e49b70ef18ccb75c9dd4b25227ad0e39c459343013b6160c303a08e816262",
+        "available": true
+      }
+    },
+    {
+      "id": "happy",
+      "spanish": "ALEGRE",
+      "english": "HAPPY",
+      "image": {
+        "file": "happy.rgb565",
+        "size": 28800,
+        "sha256": "3b8660878562b3c0b74d88072010b7f8bd38845fd02bbfc187c77daa15922bbf",
+        "available": true
+      }
+    },
+    {
+      "id": "sad",
+      "spanish": "TRISTE",
+      "english": "SAD",
+      "image": {
+        "file": "sad.rgb565",
+        "size": 28800,
+        "sha256": "76ee04026a1147549ccaebfb01909f5c386c5fac7d44f79859f00b67058cc4fe",
+        "available": true
+      }
+    },
+    {
+      "id": "old",
+      "spanish": "VIEJO",
+      "english": "OLD",
+      "image": {
+        "file": "old.rgb565",
+        "size": 28800,
+        "sha256": "5c325c28102862b8d080831cc416cf8301adf7342a9d640674860b77e7af445b",
+        "available": true
+      }
+    },
+    {
+      "id": "young",
+      "spanish": "JOVEN",
+      "english": "YOUNG",
+      "image": {
+        "file": "young.rgb565",
+        "size": 28800,
+        "sha256": "3e48dd94c2ee6852f8ef4b8dbb30c370db85e1fc47264cc3fd68ba179a7ddf81",
+        "available": true
+      }
+    }
+  ]
+}

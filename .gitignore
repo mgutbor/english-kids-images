@@ -1,5 +1,6 @@
 .pio/
 .vscode/
+tmp/
 .DS_Store
 
 # Credenciales

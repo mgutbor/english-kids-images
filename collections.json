@@ -1,0 +1,24 @@
+{
+  "collections": [
+    {
+      "id": "basic-adjectives",
+      "title": "Basic adjectives"
+    },
+    {
+      "id": "toys",
+      "title": "Toys"
+    },
+    {
+      "id": "family-members",
+      "title": "Family members"
+    },
+    {
+      "id": "colors",
+      "title": "Colors"
+    },
+    {
+      "id": "school-supplies",
+      "title": "School supplies"
+    }
+  ]
+}

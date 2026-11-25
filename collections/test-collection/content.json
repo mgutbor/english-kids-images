@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "title": "Colección de prueba",
+  "words": [
+    {
+      "id": "cat",
+      "spanish": "GATO",
+      "english": "CAT"
+    },
+    {
+      "id": "dog",
+      "spanish": "PERRO",
+      "english": "DOG"
+    },
+    {
+      "id": "house",
+      "spanish": "CASA",
+      "english": "HOUSE"
+    }
+  ]
+}

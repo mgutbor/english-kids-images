@@ -742,6 +742,8 @@ void updateImagesFromGitHub() {
             }
         }
 
+        // Validar que la imagen pertenece a la lista permitida.
+
         if (imageIndex < 0 ||
             seen[imageIndex] ||
             strlen(expectedHash) != 64 ||
@@ -758,6 +760,8 @@ void updateImagesFromGitHub() {
         }
 
         seen[imageIndex] = true;
+
+        // Validar caracteres del SHA-256.
 
         bool validHash = true;
 
@@ -784,28 +788,88 @@ void updateImagesFromGitHub() {
 
         String localPath = "/" + String(filename);
 
-        if (!imageNeedsUpdate(
-                localPath.c_str(),
-                expectedHash
-            )) {
+        // =====================================
+        // DIAGNOSTICO DE HASHES
+        // =====================================
 
-            Serial.print("Imagen actualizada: ");
-            Serial.println(filename);
+        char localHash[65] = {0};
+
+        bool hashCalculated = calculateFileSHA256(
+            localPath.c_str(),
+            localHash,
+            sizeof(localHash)
+        );
+
+        Serial.println();
+        Serial.printf("Imagen: %s\n", filename);
+
+        Serial.printf(
+            "Hash GitHub: %s\n",
+            expectedHash
+        );
+
+        if (hashCalculated) {
+
+            Serial.printf(
+                "Hash local:  %s\n",
+                localHash
+            );
+
+        } else {
+
+            Serial.println(
+                "Hash local: no disponible"
+            );
+        }
+
+        // =====================================
+        // COMPROBAR SI NECESITA ACTUALIZACION
+        // =====================================
+
+        if (hashCalculated &&
+            strcmp(localHash, expectedHash) == 0) {
+
+            Serial.println(
+                "Resultado: imagen ya actualizada"
+            );
 
             continue;
         }
 
+        Serial.println(
+            "Resultado: es necesario descargar"
+        );
+
+        // =====================================
+        // DESCARGAR IMAGEN
+        // =====================================
+
         if (!downloadImage(path, expectedHash)) {
 
+            Serial.println(
+                "ERROR actualizando imagen"
+            );
+
             allSuccessful = false;
+
+        } else {
+
+            Serial.println(
+                "Descarga y actualizacion completadas"
+            );
         }
     }
+
+    // Comprobar que aparecen las seis imagenes.
 
     for (int i = 0; i < TOTAL_IMAGES; i++) {
 
         if (!seen[i]) {
 
-            Serial.print("Falta imagen en manifiesto: ");
+            Serial.print(
+                "Falta imagen en manifiesto: "
+            );
+
             Serial.println(IMAGE_FILES[i]);
 
             allSuccessful = false;
@@ -827,6 +891,7 @@ void updateImagesFromGitHub() {
         );
     }
 }
+
 
 // =====================================
 // CARGAR IMAGEN DESDE LITTLEFS

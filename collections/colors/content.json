@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "title": "Colors",
+  "words": [
+    {
+      "id": "red",
+      "spanish": "ROJO",
+      "english": "RED"
+    },
+    {
+      "id": "blue",
+      "spanish": "AZUL",
+      "english": "BLUE"
+    },
+    {
+      "id": "yellow",
+      "spanish": "AMARILLO",
+      "english": "YELLOW"
+    },
+    {
+      "id": "green",
+      "spanish": "VERDE",
+      "english": "GREEN"
+    },
+    {
+      "id": "orange",
+      "spanish": "NARANJA",
+      "english": "ORANGE"
+    },
+    {
+      "id": "purple",
+      "spanish": "MORADO",
+      "english": "PURPLE"
+    },
+    {
+      "id": "pink",
+      "spanish": "ROSA",
+      "english": "PINK"
+    },
+    {
+      "id": "black",
+      "spanish": "NEGRO",
+      "english": "BLACK"
+    },
+    {
+      "id": "white",
+      "spanish": "BLANCO",
+      "english": "WHITE"
+    },
+    {
+      "id": "brown",
+      "spanish": "MARRÓN",
+      "english": "BROWN"
+    }
+  ]
+}

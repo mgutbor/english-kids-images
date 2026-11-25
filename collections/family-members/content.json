@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "title": "Family Members",
+  "words": [
+    {
+      "id": "mother",
+      "spanish": "MADRE",
+      "english": "MOTHER"
+    },
+    {
+      "id": "father",
+      "spanish": "PADRE",
+      "english": "FATHER"
+    },
+    {
+      "id": "sister",
+      "spanish": "HERMANA",
+      "english": "SISTER"
+    },
+    {
+      "id": "brother",
+      "spanish": "HERMANO",
+      "english": "BROTHER"
+    },
+    {
+      "id": "grandmother",
+      "spanish": "ABUELA",
+      "english": "GRANDMOTHER"
+    },
+    {
+      "id": "grandfather",
+      "spanish": "ABUELO",
+      "english": "GRANDFATHER"
+    }
+  ]
+}

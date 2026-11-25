@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "title": "Toys",
+  "words": [
+    {
+      "id": "ball",
+      "spanish": "PELOTA",
+      "english": "BALL"
+    },
+    {
+      "id": "doll",
+      "spanish": "MUÑECA",
+      "english": "DOLL"
+    },
+    {
+      "id": "car",
+      "spanish": "COCHE",
+      "english": "CAR"
+    },
+    {
+      "id": "train",
+      "spanish": "TREN",
+      "english": "TRAIN"
+    },
+    {
+      "id": "drum",
+      "spanish": "TAMBOR",
+      "english": "DRUM"
+    },
+    {
+      "id": "bike",
+      "spanish": "BICICLETA",
+      "english": "BIKE"
+    }
+  ]
+}

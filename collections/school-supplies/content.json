@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "title": "School Supplies",
+  "words": [
+    {
+      "id": "pencil",
+      "spanish": "LÁPIZ",
+      "english": "PENCIL"
+    },
+    {
+      "id": "pen",
+      "spanish": "BOLÍGRAFO",
+      "english": "PEN"
+    },
+    {
+      "id": "eraser",
+      "spanish": "GOMA",
+      "english": "ERASER"
+    },
+    {
+      "id": "book",
+      "spanish": "LIBRO",
+      "english": "BOOK"
+    },
+    {
+      "id": "chair",
+      "spanish": "SILLA",
+      "english": "CHAIR"
+    },
+    {
+      "id": "table",
+      "spanish": "MESA",
+      "english": "TABLE"
+    }
+  ]
+}

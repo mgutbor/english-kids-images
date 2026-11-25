@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "images": [
+    {
+      "file": "ugly.rgb565",
+      "path": "images/ugly.rgb565",
+      "size": 28800,
+      "sha256": "bcfdbc42a8a3554c43ef90ae2b2ef57af9d94388891fed9adf5f0d4863e1fc3f"
+    },
+    {
+      "file": "beautiful.rgb565",
+      "path": "images/beautiful.rgb565",
+      "size": 28800,
+      "sha256": "ad7e49b70ef18ccb75c9dd4b25227ad0e39c459343013b6160c303a08e816262"
+    },
+    {
+      "file": "happy.rgb565",
+      "path": "images/happy.rgb565",
+      "size": 28800,
+      "sha256": "be085c070aae80ffb117020e6fe2f69901646cc3b5fd3c8a738ab2e5c32c1a51"
+    },
+    {
+      "file": "sad.rgb565",
+      "path": "images/sad.rgb565",
+      "size": 28800,
+      "sha256": "76ee04026a1147549ccaebfb01909f5c386c5fac7d44f79859f00b67058cc4fe"
+    },
+    {
+      "file": "old.rgb565",
+      "path": "images/old.rgb565",
+      "size": 28800,
+      "sha256": "5c325c28102862b8d080831cc416cf8301adf7342a9d640674860b77e7af445b"
+    },
+    {
+      "file": "young.rgb565",
+      "path": "images/young.rgb565",
+      "size": 28800,
+      "sha256": "3e48dd94c2ee6852f8ef4b8dbb30c370db85e1fc47264cc3fd68ba179a7ddf81"
+    }
+  ]
+}

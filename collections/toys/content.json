@@ -5,32 +5,68 @@
     {
       "id": "ball",
       "spanish": "PELOTA",
-      "english": "BALL"
+      "english": "BALL",
+      "image": {
+        "file": "ball.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "f521f9088e1552d3d3e4d6ba2b3c18fd20d1b964971bd1f71e03da1e12e31176"
+      }
     },
     {
       "id": "doll",
       "spanish": "MUÑECA",
-      "english": "DOLL"
+      "english": "DOLL",
+      "image": {
+        "file": "doll.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "1a81246b5ce444f2d741392f00e353b00b3b53211c7ccffae521109d045e10b9"
+      }
     },
     {
       "id": "car",
       "spanish": "COCHE",
-      "english": "CAR"
+      "english": "CAR",
+      "image": {
+        "file": "car.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "b67ae0439abc745705a596e77238b7601037871d7081a710b3f8440eb783ade0"
+      }
     },
     {
       "id": "train",
       "spanish": "TREN",
-      "english": "TRAIN"
+      "english": "TRAIN",
+      "image": {
+        "file": "train.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "26fb3f162556fb89521f5fc2b21e3efabd295bbc820162af4e1cc8cf0b377e76"
+      }
     },
     {
       "id": "drum",
       "spanish": "TAMBOR",
-      "english": "DRUM"
+      "english": "DRUM",
+      "image": {
+        "file": "drum.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "9a35216b63bfd435d7f357753950a7511b4a1d56091be0aed4f8a5dd66318121"
+      }
     },
     {
       "id": "bike",
       "spanish": "BICICLETA",
-      "english": "BIKE"
+      "english": "BIKE",
+      "image": {
+        "file": "bike.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "26788eabbef82c18b128a763d3b4efa26f7560f6a228fe5cbfe2c1fa69876fbc"
+      }
     }
   ]
 }

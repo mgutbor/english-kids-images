@@ -8,9 +8,9 @@
       "english": "UGLY",
       "image": {
         "file": "ugly.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "bcfdbc42a8a3554c43ef90ae2b2ef57af9d94388891fed9adf5f0d4863e1fc3f",
-        "available": true
+        "sha256": "3b4a97242d4ee63b5d62716d6ab7160f91917e9309b501bb17ff4d01d3966577"
       }
     },
     {
@@ -19,9 +19,9 @@
       "english": "BEAUTIFUL",
       "image": {
         "file": "beautiful.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "ad7e49b70ef18ccb75c9dd4b25227ad0e39c459343013b6160c303a08e816262",
-        "available": true
+        "sha256": "19c7f14180b430b6fa7728cd0272960d0024283a3167d7ed0b9a367934021154"
       }
     },
     {
@@ -30,9 +30,9 @@
       "english": "HAPPY",
       "image": {
         "file": "happy.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "3b8660878562b3c0b74d88072010b7f8bd38845fd02bbfc187c77daa15922bbf",
-        "available": true
+        "sha256": "8240ff9dcc5fa0e2d4b01acb5718e470effaee90e792e84f66ebbf9ea9106905"
       }
     },
     {
@@ -41,9 +41,9 @@
       "english": "SAD",
       "image": {
         "file": "sad.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "76ee04026a1147549ccaebfb01909f5c386c5fac7d44f79859f00b67058cc4fe",
-        "available": true
+        "sha256": "29597a3c825e55237335de87de35d49a806f8fb0097b43540c1380098980ec41"
       }
     },
     {
@@ -52,9 +52,9 @@
       "english": "OLD",
       "image": {
         "file": "old.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "5c325c28102862b8d080831cc416cf8301adf7342a9d640674860b77e7af445b",
-        "available": true
+        "sha256": "32a298db482fbfe95f554c61866b3f35492f2fd8045de6d60d5543ea7b6f7e56"
       }
     },
     {
@@ -63,9 +63,9 @@
       "english": "YOUNG",
       "image": {
         "file": "young.rgb565",
+        "available": true,
         "size": 28800,
-        "sha256": "3e48dd94c2ee6852f8ef4b8dbb30c370db85e1fc47264cc3fd68ba179a7ddf81",
-        "available": true
+        "sha256": "dd1ecabd0bf7cfcebfd081c40ebb3cd897df50a6e25f81cc77226af9b2b0037d"
       }
     }
   ]

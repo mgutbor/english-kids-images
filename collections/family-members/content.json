@@ -5,32 +5,68 @@
     {
       "id": "mother",
       "spanish": "MADRE",
-      "english": "MOTHER"
+      "english": "MOTHER",
+      "image": {
+        "file": "mother.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "03cc168be54f8084642307eef164ba3c770a6ed8a0651c3b8ecc0223174b46f4"
+      }
     },
     {
       "id": "father",
       "spanish": "PADRE",
-      "english": "FATHER"
+      "english": "FATHER",
+      "image": {
+        "file": "father.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "dd1a98061019235446f5e6af5680cceacc2d2a57f85b97e1db1a87b1e2efd0af"
+      }
     },
     {
       "id": "sister",
       "spanish": "HERMANA",
-      "english": "SISTER"
+      "english": "SISTER",
+      "image": {
+        "file": "sister.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "75c12e506c616d23b0daca044902d6e0edaaa74a0b0987c39d69c1cc5dbefb7e"
+      }
     },
     {
       "id": "brother",
       "spanish": "HERMANO",
-      "english": "BROTHER"
+      "english": "BROTHER",
+      "image": {
+        "file": "brother.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "8ab7fe800600e768cc1b97af69cf695e86a560ffe7ea15259f77dc82639fc342"
+      }
     },
     {
       "id": "grandmother",
       "spanish": "ABUELA",
-      "english": "GRANDMOTHER"
+      "english": "GRANDMOTHER",
+      "image": {
+        "file": "grandmother.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "86116b5716f26a5a335a35019d526dec223ccca04e8805544da47a18cf15f9d8"
+      }
     },
     {
       "id": "grandfather",
       "spanish": "ABUELO",
-      "english": "GRANDFATHER"
+      "english": "GRANDFATHER",
+      "image": {
+        "file": "grandfather.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "55fb05591c6414f84796b4309adfed9aa1402674ee20eeb9f12d75d731e11215"
+      }
     }
   ]
 }

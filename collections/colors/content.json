@@ -5,52 +5,112 @@
     {
       "id": "red",
       "spanish": "ROJO",
-      "english": "RED"
+      "english": "RED",
+      "image": {
+        "file": "red.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "1f9edb66a500f541d261399de09e54cdeb8b0bd320a9682d690269a51ca0546f"
+      }
     },
     {
       "id": "blue",
       "spanish": "AZUL",
-      "english": "BLUE"
+      "english": "BLUE",
+      "image": {
+        "file": "blue.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "177254f29f16148b9f36637a3104561a0432abf4094e18271dc8c797fdb53653"
+      }
     },
     {
       "id": "yellow",
       "spanish": "AMARILLO",
-      "english": "YELLOW"
+      "english": "YELLOW",
+      "image": {
+        "file": "yellow.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "dc3f8c840bd2f66b421fac32f2c9ba6bc83f442b15422a702b583ac9a92422b5"
+      }
     },
     {
       "id": "green",
       "spanish": "VERDE",
-      "english": "GREEN"
+      "english": "GREEN",
+      "image": {
+        "file": "green.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "0c7799de65a3d59e09720707ac6687ff487833e2b1c09d5e95c7dd4acf30d65c"
+      }
     },
     {
       "id": "orange",
       "spanish": "NARANJA",
-      "english": "ORANGE"
+      "english": "ORANGE",
+      "image": {
+        "file": "orange.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "ac18a333d737cae4442e85b6d18e2cc704c6ec0d06ec0819d992e8896c2e2c66"
+      }
     },
     {
       "id": "purple",
       "spanish": "MORADO",
-      "english": "PURPLE"
+      "english": "PURPLE",
+      "image": {
+        "file": "purple.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "40be82ae9f9103ce1600771c6a7bf1e6bd5de9a0ea019f141c1c96f67938e1e2"
+      }
     },
     {
       "id": "pink",
       "spanish": "ROSA",
-      "english": "PINK"
+      "english": "PINK",
+      "image": {
+        "file": "pink.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "578daa30d031773c472bf110f7fc7e478ab73a03d807718cc7e3622237ce2f83"
+      }
     },
     {
       "id": "black",
       "spanish": "NEGRO",
-      "english": "BLACK"
+      "english": "BLACK",
+      "image": {
+        "file": "black.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "ee2ba7dce8355662ed7de61b4ce99690f7a6e6b336da9dd8daf8e6b32477e24b"
+      }
     },
     {
       "id": "white",
       "spanish": "BLANCO",
-      "english": "WHITE"
+      "english": "WHITE",
+      "image": {
+        "file": "white.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "046116ae67257db34d1e8454843ceffd4d529a850c9700b0b9e1ddb2f1f81190"
+      }
     },
     {
       "id": "brown",
       "spanish": "MARRÓN",
-      "english": "BROWN"
+      "english": "BROWN",
+      "image": {
+        "file": "brown.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "084683b85ff53b93e8a72d6a8c34e0992e0ae1d8304b9398ec0dbf6952f54f20"
+      }
     }
   ]
 }

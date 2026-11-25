@@ -124,6 +124,14 @@ void drawEndScreen();
 void drawQuestion();
 void startGame();
 
+void drawSpanishTextCentered(
+    const char* text,
+    int centerX,
+    int y,
+    uint16_t color,
+    uint8_t textSize
+);
+
 bool loadActiveCollectionFromLocal();
 bool updateCollectionFromGitHub();
 void updateImagesForActiveCollection();
@@ -1439,6 +1447,7 @@ void drawOption(
 // MOSTRAR PREGUNTA
 // =====================================
 
+
 void drawQuestion() {
 
     if (!collectionLoaded || TOTAL_WORDS < 2) {
@@ -1450,9 +1459,7 @@ void drawQuestion() {
     int wrongIndex;
 
     do {
-
         wrongIndex = random(TOTAL_WORDS);
-
     } while (wrongIndex == wordIndex);
 
     leftIsCorrect = random(2) == 0;
@@ -1481,23 +1488,18 @@ void drawQuestion() {
     tft.print(" DE ");
     tft.print(TOTAL_WORDS);
 
-    // Palabra en espanol.
+    // Palabra en español.
+    // El renderizador gestiona UTF-8 y los acentos.
 
-    tft.setTextColor(ILI9341_BLACK);
-    tft.setTextSize(2);
-
-    int wordWidth =
-        strlen(words[wordIndex].spanish) * 12;
-
-    tft.setCursor(
-        (320 - wordWidth) / 2,
-        49
+    drawSpanishTextCentered(
+        words[wordIndex].spanish,
+        160,
+        49,
+        ILI9341_BLACK,
+        2
     );
 
-    tft.print(words[wordIndex].spanish);
-
     // La imagen es opcional.
-    // Si no existe, las opciones suben.
 
     bool hasImage = drawCharacter(wordIndex);
 
@@ -1879,4 +1881,194 @@ void loop() {
 
     lastRedState = redState;
     lastYellowState = yellowState;
+}
+
+
+// =====================================
+// SOPORTE DE CARACTERES ESPAÑOLES UTF-8
+// =====================================
+
+uint32_t readUtf8Character(const char*& text) {
+
+    uint8_t c = (uint8_t)*text++;
+
+    if (c < 0x80) {
+        return c;
+    }
+
+    if ((c & 0xE0) == 0xC0) {
+
+        uint8_t c2 = (uint8_t)*text++;
+
+        return ((c & 0x1F) << 6) |
+               (c2 & 0x3F);
+    }
+
+    if ((c & 0xF0) == 0xE0) {
+
+        uint8_t c2 = (uint8_t)*text++;
+        uint8_t c3 = (uint8_t)*text++;
+
+        return ((c & 0x0F) << 12) |
+               ((c2 & 0x3F) << 6) |
+               (c3 & 0x3F);
+    }
+
+    return '?';
+}
+
+char spanishBaseCharacter(
+    uint32_t codepoint,
+    uint8_t& accent
+) {
+
+    accent = 0;
+
+    switch (codepoint) {
+
+        // MAYUSCULAS
+
+        case 0x00C1: accent = 1; return 'A'; // Á
+        case 0x00C9: accent = 1; return 'E'; // É
+        case 0x00CD: accent = 1; return 'I'; // Í
+        case 0x00D3: accent = 1; return 'O'; // Ó
+        case 0x00DA: accent = 1; return 'U'; // Ú
+        case 0x00D1: accent = 2; return 'N'; // Ñ
+        case 0x00DC: accent = 3; return 'U'; // Ü
+
+        // MINUSCULAS
+
+        case 0x00E1: accent = 1; return 'a'; // á
+        case 0x00E9: accent = 1; return 'e'; // é
+        case 0x00ED: accent = 1; return 'i'; // í
+        case 0x00F3: accent = 1; return 'o'; // ó
+        case 0x00FA: accent = 1; return 'u'; // ú
+        case 0x00F1: accent = 2; return 'n'; // ñ
+        case 0x00FC: accent = 3; return 'u'; // ü
+    }
+
+    return codepoint < 0x80
+        ? (char)codepoint
+        : '?';
+}
+
+int getUtf8CharacterCount(const char* text) {
+
+    int count = 0;
+
+    while (*text) {
+
+        readUtf8Character(text);
+        count++;
+    }
+
+    return count;
+}
+
+void drawSpanishTextCentered(
+    const char* text,
+    int centerX,
+    int y,
+    uint16_t color,
+    uint8_t textSize
+) {
+
+    if (!text || !text[0]) {
+        return;
+    }
+
+    const int charWidth = 6 * textSize;
+
+    int totalWidth =
+        getUtf8CharacterCount(text) * charWidth;
+
+    int cursorX = centerX - totalWidth / 2;
+
+    const char* current = text;
+
+    tft.setTextSize(textSize);
+    tft.setTextColor(color);
+
+    while (*current) {
+
+        uint32_t codepoint =
+            readUtf8Character(current);
+
+        uint8_t accent = 0;
+
+        char base = spanishBaseCharacter(
+            codepoint,
+            accent
+        );
+
+        // Dibujar la letra base.
+
+        tft.setCursor(
+            cursorX,
+            y + 2 * textSize
+        );
+
+        tft.write((uint8_t)base);
+
+        // Dibujar el acento sobre la letra.
+
+        int unit = textSize;
+
+        if (accent == 1) {
+
+            // Acento agudo.
+
+            tft.drawLine(
+                cursorX + 4 * unit,
+                y + unit,
+                cursorX + 5 * unit,
+                y,
+                color
+            );
+        }
+
+        else if (accent == 2) {
+
+            // Virgulilla de la Ñ.
+
+            tft.drawLine(
+                cursorX + 2 * unit,
+                y + unit,
+                cursorX + 3 * unit,
+                y,
+                color
+            );
+
+            tft.drawLine(
+                cursorX + 3 * unit,
+                y,
+                cursorX + 4 * unit,
+                y + unit,
+                color
+            );
+        }
+
+        else if (accent == 3) {
+
+            // Diéresis.
+
+            tft.fillRect(
+                cursorX + 2 * unit,
+                y,
+                unit,
+                unit,
+                color
+            );
+
+            tft.fillRect(
+                cursorX + 4 * unit,
+                y,
+                unit,
+                unit,
+                color
+            );
+        }
+
+        cursorX += charWidth;
+    }
 }

@@ -5,32 +5,68 @@
     {
       "id": "pencil",
       "spanish": "LÁPIZ",
-      "english": "PENCIL"
+      "english": "PENCIL",
+      "image": {
+        "file": "pencil.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "ff967385a981274dc3f881ccdffb453e0c262ccc8e13a9eae5c07c1b7b8460aa"
+      }
     },
     {
       "id": "pen",
       "spanish": "BOLÍGRAFO",
-      "english": "PEN"
+      "english": "PEN",
+      "image": {
+        "file": "pen.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "77bbc9e51feae32f0d69850dc4d8dec0d1147b33db5c91d68647c23bef1f2ac2"
+      }
     },
     {
       "id": "eraser",
       "spanish": "GOMA",
-      "english": "ERASER"
+      "english": "ERASER",
+      "image": {
+        "file": "eraser.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "ac5db50f1ad4b332986faacebd21680d774447a9cbcc2f0d15cf7c007f60e287"
+      }
     },
     {
       "id": "book",
       "spanish": "LIBRO",
-      "english": "BOOK"
+      "english": "BOOK",
+      "image": {
+        "file": "book.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "d12a156569eede04eb685363d155889503ffb3bfabe47b7217918919bf8022dc"
+      }
     },
     {
       "id": "chair",
       "spanish": "SILLA",
-      "english": "CHAIR"
+      "english": "CHAIR",
+      "image": {
+        "file": "chair.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "c607791f1b954fd9789323f445a39a5855b8fb3210c072583e79cb164753b8b9"
+      }
     },
     {
       "id": "table",
       "spanish": "MESA",
-      "english": "TABLE"
+      "english": "TABLE",
+      "image": {
+        "file": "table.rgb565",
+        "available": true,
+        "size": 28800,
+        "sha256": "313c03493de4dbc0cfb97f0b01c8249a73fd2e53dcb88b47373d8ed8d45eabe4"
+      }
     }
   ]
 }

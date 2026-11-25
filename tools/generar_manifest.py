@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 IMAGES_DIR = ROOT / "images"
 OUTPUT = ROOT / "version.json"
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 EXPECTED_IMAGES = [
     "ugly.rgb565",

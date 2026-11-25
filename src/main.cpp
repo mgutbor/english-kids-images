@@ -461,12 +461,16 @@ bool imageNeedsUpdate(
 // DESCARGAR Y SUSTITUIR UNA IMAGEN
 // =====================================
 
+
+
 bool downloadImage(
     const char* imagePath,
     const char* expectedHash
 ) {
+    String filename = String(imagePath);
+    filename.replace("images/", "");
 
-    String target = "/" + String(imagePath);
+    String target = "/" + filename;
     String temp = target + ".tmp";
     String backup = target + ".bak";
 
@@ -477,198 +481,105 @@ bool downloadImage(
     Serial.println(imagePath);
 
     WiFiClientSecure client;
-
-    // Configuracion temporal para pruebas.
-    // Pendiente de sustituir por validacion TLS.
-
     client.setInsecure();
-    client.setTimeout(15000);
+    client.setTimeout(30000);
 
     HTTPClient http;
-
-    http.setTimeout(15000);
-
-    http.setFollowRedirects(
-        HTTPC_STRICT_FOLLOW_REDIRECTS
-    );
+    http.setTimeout(30000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
     if (!http.begin(client, url)) {
-
         Serial.println("No se pudo iniciar conexion HTTP");
-
         return false;
     }
 
     int httpCode = http.GET();
 
     if (httpCode != HTTP_CODE_OK) {
-
         Serial.printf("Error HTTP: %d\n", httpCode);
-
         http.end();
-
         return false;
     }
 
     int contentLength = http.getSize();
 
+    Serial.printf("Tamano esperado: %d bytes\n", contentLength);
+
     if (contentLength != (int)IMAGE_BYTES) {
-
         Serial.println("Tamano de descarga incorrecto");
-
         http.end();
-
         return false;
     }
+
+    LittleFS.remove(temp);
 
     File output = LittleFS.open(temp, "w");
 
     if (!output) {
-
         Serial.println("No se pudo crear archivo temporal");
-
         http.end();
-
         return false;
     }
 
-    mbedtls_sha256_context ctx;
+    // HTTPClient gestiona la lectura del flujo.
+    int downloaded = http.writeToStream(&output);
 
-    mbedtls_sha256_init(&ctx);
-
-    bool success =
-        mbedtls_sha256_starts(&ctx, 0) == 0;
-
-    uint8_t buffer[1024];
-
-    size_t totalWritten = 0;
-
-    Stream* stream = http.getStreamPtr();
-
-    while (success && totalWritten < IMAGE_BYTES) {
-
-        size_t remaining = IMAGE_BYTES - totalWritten;
-
-        size_t requested = min(
-            remaining,
-            sizeof(buffer)
-        );
-
-        size_t received = stream->readBytes(
-            buffer,
-            requested
-        );
-
-        if (received == 0) {
-
-            success = false;
-            break;
-        }
-
-        size_t written = output.write(
-            buffer,
-            received
-        );
-
-        if (written != received) {
-
-            success = false;
-            break;
-        }
-
-        if (mbedtls_sha256_update(
-                &ctx,
-                buffer,
-                received
-            ) != 0) {
-
-            success = false;
-            break;
-        }
-
-        totalWritten += received;
-    }
-
-    uint8_t hash[32] = {0};
-
-    if (success) {
-
-        success =
-            mbedtls_sha256_finish(
-                &ctx,
-                hash
-            ) == 0;
-    }
-
-    mbedtls_sha256_free(&ctx);
-
+    output.flush();
     output.close();
-
     http.end();
 
-    if (!success || totalWritten != IMAGE_BYTES) {
+    Serial.printf(
+        "Bytes descargados: %d de %u\n",
+        downloaded,
+        (unsigned int)IMAGE_BYTES
+    );
 
+    if (downloaded != (int)IMAGE_BYTES) {
         Serial.println("Descarga incompleta");
-
         LittleFS.remove(temp);
-
         return false;
     }
 
+    // Verificar SHA-256 del archivo descargado.
     char downloadedHash[65];
 
-    for (int i = 0; i < 32; i++) {
-
-        sprintf(
-            downloadedHash + (i * 2),
-            "%02x",
-            hash[i]
-        );
+    if (!calculateFileSHA256(
+            temp.c_str(),
+            downloadedHash,
+            sizeof(downloadedHash)
+        )) {
+        Serial.println("No se pudo calcular SHA-256");
+        LittleFS.remove(temp);
+        return false;
     }
 
-    downloadedHash[64] = '\0';
-
     if (strcmp(downloadedHash, expectedHash) != 0) {
-
         Serial.println("ERROR: SHA-256 incorrecto");
-
         LittleFS.remove(temp);
-
         return false;
     }
 
     Serial.println("Imagen descargada y verificada");
 
-    // =================================
-    // SUSTITUCION CON COPIA DE SEGURIDAD
-    // =================================
-
+    // Sustitucion con copia de seguridad.
     if (LittleFS.exists(backup)) {
         LittleFS.remove(backup);
     }
 
     if (LittleFS.exists(target)) {
-
         if (!LittleFS.rename(target, backup)) {
-
             LittleFS.remove(temp);
-
-            Serial.println(
-                "No se pudo crear copia de seguridad"
-            );
-
+            Serial.println("No se pudo crear copia de seguridad");
             return false;
         }
     }
 
     if (!LittleFS.rename(temp, target)) {
-
         if (LittleFS.exists(backup)) {
             LittleFS.rename(backup, target);
         }
 
         Serial.println("Error sustituyendo imagen");
-
         return false;
     }
 
@@ -681,9 +592,11 @@ bool downloadImage(
     return true;
 }
 
+
 // =====================================
 // COMPROBAR ACTUALIZACIONES EN GITHUB
 // =====================================
+
 
 void updateImagesFromGitHub() {
 
@@ -713,24 +626,39 @@ void updateImagesFromGitHub() {
     // Pendiente de sustituir por validacion TLS.
 
     client.setInsecure();
-    client.setTimeout(15000);
+    client.setTimeout(30000);
 
     HTTPClient http;
 
-    http.setTimeout(15000);
+    http.setTimeout(30000);
 
     http.setFollowRedirects(
         HTTPC_STRICT_FOLLOW_REDIRECTS
     );
 
+    Serial.println(
+        "Conectando con GitHub para obtener manifest..."
+    );
+
     if (!http.begin(client, MANIFEST_URL)) {
 
-        Serial.println("No se pudo conectar con GitHub");
+        Serial.println(
+            "No se pudo iniciar conexion HTTP con GitHub"
+        );
 
         return;
     }
 
+    Serial.println("Conexion HTTP iniciada");
+
+    Serial.println("Solicitando manifest...");
+
     int httpCode = http.GET();
+
+    Serial.printf(
+        "Respuesta HTTP: %d\n",
+        httpCode
+    );
 
     if (httpCode != HTTP_CODE_OK) {
 
@@ -744,7 +672,14 @@ void updateImagesFromGitHub() {
         return;
     }
 
+    Serial.println("Descargando contenido del manifest...");
+
     String payload = http.getString();
+
+    Serial.printf(
+        "Manifest recibido: %u bytes\n",
+        (unsigned int)payload.length()
+    );
 
     http.end();
 
@@ -807,9 +742,6 @@ void updateImagesFromGitHub() {
             }
         }
 
-        // Comprobar que la entrada pertenece
-        // a una de las seis imagenes permitidas.
-
         if (imageIndex < 0 ||
             seen[imageIndex] ||
             strlen(expectedHash) != 64 ||
@@ -826,9 +758,6 @@ void updateImagesFromGitHub() {
         }
 
         seen[imageIndex] = true;
-
-        // Comprobar que el hash contiene
-        // exclusivamente caracteres hexadecimales.
 
         bool validHash = true;
 
@@ -871,8 +800,6 @@ void updateImagesFromGitHub() {
             allSuccessful = false;
         }
     }
-
-    // Comprobar que estan presentes las seis imagenes.
 
     for (int i = 0; i < TOTAL_IMAGES; i++) {
 

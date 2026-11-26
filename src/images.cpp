@@ -126,6 +126,7 @@ bool downloadImage(
     int status = http.GET();
 
     if (status != HTTP_CODE_OK) {
+        Serial.printf("ERROR: imagen %s HTTP %d\n", filename, status);
         http.end();
         return false;
     }
@@ -134,6 +135,12 @@ bool downloadImage(
 
     if (contentLength > 0 &&
         (size_t)contentLength != expectedSize) {
+        Serial.printf(
+            "ERROR: imagen %s tamaño remoto %d (esperado %u)\n",
+            filename,
+            contentLength,
+            (unsigned)expectedSize
+        );
         http.end();
         return false;
     }
@@ -193,6 +200,11 @@ bool downloadImage(
     http.end();
 
     if (total != expectedSize) {
+        Serial.printf(
+            "ERROR: imagen %s tamaño descargado %u\n",
+            filename,
+            (unsigned)total
+        );
         LittleFS.remove(temporaryPath);
         return false;
     }
@@ -202,6 +214,7 @@ bool downloadImage(
         expectedSize,
         expectedHash
     )) {
+        Serial.printf("ERROR: imagen %s hash inválido\n", filename);
         LittleFS.remove(temporaryPath);
         return false;
     }
@@ -262,6 +275,10 @@ bool updateImagesForActiveCollection() {
                 allOk = false;
             }
         }
+    }
+
+    if (!allOk) {
+        Serial.println("ERROR: imágenes sin actualizar");
     }
 
     return allOk;

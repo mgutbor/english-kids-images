@@ -62,7 +62,7 @@ static bool downloadText(const String& url, String& payload) {
     int status = http.GET();
 
     if (status != HTTP_CODE_OK) {
-        Serial.printf("HTTP error: %d\n", status);
+        Serial.printf("ERROR: HTTP %d en %s\n", status, url.c_str());
         http.end();
         return false;
     }
@@ -70,7 +70,12 @@ static bool downloadText(const String& url, String& payload) {
     payload = http.getString();
     http.end();
 
-    return payload.length() > 0;
+    if (payload.length() == 0) {
+        Serial.printf("ERROR: respuesta vacía: %s\n", url.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 static String collectionContentPath(const char* id) {
@@ -81,7 +86,7 @@ static bool parseCatalog(const String& json) {
     DynamicJsonDocument doc(CATALOG_JSON_CAPACITY);
 
     if (deserializeJson(doc, json)) {
-        Serial.println("Catálogo JSON inválido");
+        Serial.println("ERROR: catálogo JSON inválido");
         return false;
     }
 
@@ -127,10 +132,17 @@ bool loadCollectionCatalog() {
     String json;
 
     if (!readTextFile("/collections.json", json)) {
+        Serial.println("ERROR: catálogo local ausente");
         return false;
     }
 
-    return parseCatalog(json);
+    if (!parseCatalog(json)) {
+        return false;
+    }
+
+    Serial.printf("Catálogo local: %d colecciones\n", totalCollections);
+
+    return true;
 }
 
 bool downloadCollectionCatalog() {
@@ -140,7 +152,13 @@ bool downloadCollectionCatalog() {
         return false;
     }
 
-    return saveCollectionCatalog(json);
+    if (!saveCollectionCatalog(json)) {
+        return false;
+    }
+
+    Serial.printf("Catálogo descargado: %d colecciones\n", totalCollections);
+
+    return true;
 }
 
 int findCollectionIndex(const char* collectionId) {
@@ -182,7 +200,10 @@ bool loadSelectedCollection() {
 }
 
 bool saveSelectedCollection(const char* collectionId) {
-    if (!validIdentifier(collectionId)) return false;
+    if (!validIdentifier(collectionId)) {
+        Serial.println("ERROR: id de colección inválido");
+        return false;
+    }
 
     DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
     doc["activeCollection"] = collectionId;
@@ -191,6 +212,9 @@ bool saveSelectedCollection(const char* collectionId) {
     serializeJson(doc, json);
 
     if (!writeFileAtomic("/selected_collection.json", json)) {
+        Serial.println(
+            "ERROR: no se pudo guardar la colección seleccionada"
+        );
         return false;
     }
 
@@ -214,6 +238,10 @@ bool downloadCollectionContent(const char* collectionId) {
     DynamicJsonDocument doc(CONTENT_JSON_CAPACITY);
 
     if (deserializeJson(doc, json)) {
+        Serial.printf(
+            "ERROR: contenido remoto inválido: %s (JSON)\n",
+            collectionId
+        );
         return false;
     }
 
@@ -221,6 +249,11 @@ bool downloadCollectionContent(const char* collectionId) {
 
     if (array.isNull() || array.size() < 2 ||
         array.size() > MAX_WORDS) {
+        Serial.printf(
+            "ERROR: contenido remoto inválido: %s (palabras: %d)\n",
+            collectionId,
+            array.isNull() ? 0 : (int)array.size()
+        );
         return false;
     }
 
@@ -231,6 +264,12 @@ bool downloadCollectionContent(const char* collectionId) {
 
         if (!id || !spanish || !english ||
             !id[0] || !spanish[0] || !english[0]) {
+
+            Serial.printf(
+                "ERROR: contenido remoto inválido: %s (palabra %s)\n",
+                collectionId,
+                id ? id : "?"
+            );
             return false;
         }
     }
@@ -240,25 +279,36 @@ bool downloadCollectionContent(const char* collectionId) {
     if (!ensureDirectory("/collections")) return false;
     if (!ensureDirectory(directory.c_str())) return false;
 
-    return writeFileAtomic(
+    if (!writeFileAtomic(
         collectionContentPath(collectionId).c_str(),
         json
-    );
+    )) {
+        return false;
+    }
+
+    Serial.printf("Contenido descargado: %s\n", collectionId);
+
+    return true;
 }
 
 bool loadActiveCollectionFromLocal() {
-    if (!activeCollection[0]) return false;
+    if (!activeCollection[0]) {
+        Serial.println("ERROR: no hay colección activa");
+        return false;
+    }
 
     String path = collectionContentPath(activeCollection);
     String json;
 
     if (!readTextFile(path.c_str(), json)) {
+        Serial.printf("ERROR: contenido local ausente: %s\n", path.c_str());
         return false;
     }
 
     DynamicJsonDocument doc(CONTENT_JSON_CAPACITY);
 
     if (deserializeJson(doc, json)) {
+        Serial.printf("ERROR: contenido local corrupto: %s\n", path.c_str());
         return false;
     }
 
@@ -266,6 +316,7 @@ bool loadActiveCollectionFromLocal() {
 
     if (array.isNull() || array.size() < 2 ||
         array.size() > MAX_WORDS) {
+        Serial.printf("ERROR: contenido local inválido: %s\n", path.c_str());
         return false;
     }
 
@@ -351,37 +402,35 @@ bool selectCollection(int index) {
 bool nextCollection() {
     if (totalCollections == 0) return false;
 
-    int next = (selectedCollectionIndex + 1) % totalCollections;
+    int start = selectedCollectionIndex;
 
-    while (next != selectedCollectionIndex &&
-           !isCollectionAvailableOffline(collections[next].id)) {
-        next = (next + 1) % totalCollections;
+    for (int i = 0; i < totalCollections; i++) {
+        int next = (start + i + 1) % totalCollections;
+
+        if (WiFi.status() == WL_CONNECTED ||
+            isCollectionAvailableOffline(collections[next].id)) {
+            selectedCollectionIndex = next;
+            return true;
+        }
     }
 
-    if (!isCollectionAvailableOffline(collections[next].id)) {
-        return false;
-    }
-
-    selectedCollectionIndex = next;
-    return true;
+    return false;
 }
 
 bool previousCollection() {
     if (totalCollections == 0) return false;
 
-    int previous = selectedCollectionIndex - 1;
+    int start = selectedCollectionIndex;
 
-    if (previous < 0) previous = totalCollections - 1;
+    for (int i = 0; i < totalCollections; i++) {
+        int previous = (start - i - 1 + totalCollections) % totalCollections;
 
-    int start = previous;
-
-    while (!isCollectionAvailableOffline(collections[previous].id)) {
-        previous--;
-
-        if (previous < 0) previous = totalCollections - 1;
-        if (previous == start) return false;
+        if (WiFi.status() == WL_CONNECTED ||
+            isCollectionAvailableOffline(collections[previous].id)) {
+            selectedCollectionIndex = previous;
+            return true;
+        }
     }
 
-    selectedCollectionIndex = previous;
-    return true;
+    return false;
 }

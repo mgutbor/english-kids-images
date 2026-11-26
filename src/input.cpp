@@ -6,19 +6,31 @@
 static bool previousRed = false;
 static bool previousYellow = false;
 
+static unsigned long redPressedAt = 0;
+static unsigned long yellowPressedAt = 0;
 static unsigned long bothPressedAt = 0;
 static unsigned long lastActionAt = 0;
 
-static bool longPressHandled = false;
-static bool shortPressPending = false;
+static bool redConsumed = false;
+static bool yellowConsumed = false;
+
+static bool bothTracking = false;
+static bool bothLongHandled = false;
 
 void initInput() {
     previousRed = false;
     previousYellow = false;
+
+    redPressedAt = 0;
+    yellowPressedAt = 0;
     bothPressedAt = 0;
     lastActionAt = 0;
-    longPressHandled = false;
-    shortPressPending = false;
+
+    redConsumed = false;
+    yellowConsumed = false;
+
+    bothTracking = false;
+    bothLongHandled = false;
 }
 
 void resetInput() {
@@ -30,54 +42,99 @@ InputAction readInput() {
     bool yellow = yellowPressed();
     unsigned long now = millis();
 
+    bool redRising = red && !previousRed;
+    bool yellowRising = yellow && !previousYellow;
+
+    bool redFalling = !red && previousRed;
+    bool yellowFalling = !yellow && previousYellow;
+
+    previousRed = red;
+    previousYellow = yellow;
+
+    if (redRising) {
+        redPressedAt = now;
+        redConsumed = false;
+    }
+
+    if (yellowRising) {
+        yellowPressedAt = now;
+        yellowConsumed = false;
+    }
+
+    // Ambos botones pulsados: abrir selector con pulsación larga.
     if (red && yellow) {
-        if (bothPressedAt == 0) {
+        if (!bothTracking) {
+            bothTracking = true;
             bothPressedAt = now;
-            longPressHandled = false;
-            shortPressPending = false;
+
+            redConsumed = true;
+            yellowConsumed = true;
         }
 
-        if (!longPressHandled &&
+        if (!bothLongHandled &&
             now - bothPressedAt >= LONG_PRESS_DELAY) {
-            longPressHandled = true;
-            shortPressPending = false;
+
+            bothLongHandled = true;
+            lastActionAt = now;
+
             return INPUT_BOTH_LONG;
         }
 
         return INPUT_NONE;
     }
 
-    if (bothPressedAt != 0) {
-        unsigned long duration = now - bothPressedAt;
-        bothPressedAt = 0;
+    // Finalizar gesto de ambos botones.
+    if (bothTracking) {
+        bool wasLong = bothLongHandled;
 
-        if (!longPressHandled && duration >= DEBOUNCE_DELAY) {
+        bothTracking = false;
+        bothLongHandled = false;
+
+        if (!wasLong &&
+            now - lastActionAt >= DEBOUNCE_DELAY) {
+
             lastActionAt = now;
             return INPUT_BOTH_SHORT;
         }
-
-        longPressHandled = false;
-        return INPUT_NONE;
     }
 
-    if (now - lastActionAt < DEBOUNCE_DELAY) {
-        return INPUT_NONE;
-    }
+    // Rojo mantenido durante 2 segundos.
+    if (red && !yellow && !redConsumed &&
+        now - redPressedAt >= LONG_PRESS_DELAY) {
 
-    if (red && !previousRed && !yellow) {
-        previousRed = true;
+        redConsumed = true;
         lastActionAt = now;
-        return INPUT_RED;
+
+        return INPUT_RED_LONG;
     }
 
-    if (yellow && !previousYellow && !red) {
-        previousYellow = true;
-        lastActionAt = now;
-        return INPUT_YELLOW;
+    // Pulsación corta del rojo.
+    if (redFalling) {
+        bool validPress = !redConsumed;
+
+        redConsumed = false;
+
+        if (validPress &&
+            now - lastActionAt >= DEBOUNCE_DELAY) {
+
+            lastActionAt = now;
+            return INPUT_RED;
+        }
     }
 
-    if (!red) previousRed = false;
-    if (!yellow) previousYellow = false;
+    // Pulsación corta del amarillo.
+    if (yellowFalling) {
+        bool validPress = !yellowConsumed;
+
+        yellowConsumed = false;
+
+        if (validPress &&
+            now - lastActionAt >= DEBOUNCE_DELAY) {
+
+            lastActionAt = now;
+            return INPUT_YELLOW;
+        }
+    }
 
     return INPUT_NONE;
 }

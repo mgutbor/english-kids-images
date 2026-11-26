@@ -5,7 +5,7 @@
 bool initStorage() {
     // Nunca formatear automáticamente: podemos perder contenido.
     if (!LittleFS.begin(false)) {
-        Serial.println("ERROR: No se pudo montar LittleFS");
+        Serial.println("ERROR: no se pudo montar LittleFS");
         return false;
     }
 
@@ -22,7 +22,15 @@ bool ensureDirectory(const char* path) {
         return true;
     }
 
-    return LittleFS.mkdir(path);
+    if (!LittleFS.mkdir(path)) {
+        Serial.printf(
+            "ERROR: no se pudo crear el directorio %s\n",
+            path
+        );
+        return false;
+    }
+
+    return true;
 }
 
 bool readTextFile(const char* path, String& content) {
@@ -77,7 +85,7 @@ bool writeFileAtomic(const char* path, const String& content) {
     File file = LittleFS.open(temporaryPath, FILE_WRITE);
 
     if (!file) {
-        Serial.printf("No se pudo crear %s\n", temporaryPath.c_str());
+        Serial.printf("ERROR: no se pudo crear %s\n", temporaryPath.c_str());
         return false;
     }
 
@@ -86,6 +94,10 @@ bool writeFileAtomic(const char* path, const String& content) {
     file.close();
 
     if (written != content.length()) {
+        Serial.printf(
+            "ERROR: escritura incompleta en %s\n",
+            temporaryPath.c_str()
+        );
         LittleFS.remove(temporaryPath);
         return false;
     }
@@ -97,11 +109,13 @@ bool writeFileAtomic(const char* path, const String& content) {
     bool hadOriginal = LittleFS.exists(path);
 
     if (hadOriginal && !LittleFS.rename(path, backupPath)) {
+        Serial.printf("ERROR: no se pudo respaldar %s\n", path);
         LittleFS.remove(temporaryPath);
         return false;
     }
 
     if (!LittleFS.rename(temporaryPath, path)) {
+        Serial.printf("ERROR: no se pudo reemplazar %s\n", path);
         if (hadOriginal) {
             LittleFS.rename(backupPath, path);
         }

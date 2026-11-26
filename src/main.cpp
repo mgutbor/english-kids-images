@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -26,37 +27,42 @@ enum AppState {
     STATE_GAME,
     STATE_END,
     STATE_COLLECTION_SELECTOR,
+    STATE_WAIT_RELEASE,
     STATE_ERROR
 };
 
 static AppState appState = STATE_GAME;
 
-static unsigned long lastBothPress = 0;
-static bool selectorOpenedByLongPress = false;
+static unsigned long buttonsReleasedAt = 0;
+
+// =====================================================
+// WIFI
+// =====================================================
 
 static void connectWiFi() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-    Serial.print("Conectando WiFi");
+    Serial.println("WiFi: conectando");
 
     unsigned long started = millis();
 
     while (WiFi.status() != WL_CONNECTED &&
            millis() - started < 15000) {
-        Serial.print(".");
         delay(300);
     }
 
-    Serial.println();
-
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.print("WiFi conectado: ");
+        Serial.print("WiFi: conectado ");
         Serial.println(WiFi.localIP());
     } else {
-        Serial.println("Sin conexión WiFi");
+        Serial.println("WiFi: sin conexión");
     }
 }
+
+// =====================================================
+// CONFIGURACIÓN
+// =====================================================
 
 static bool loadDefaultCollection() {
     String json;
@@ -78,18 +84,19 @@ static bool loadDefaultCollection() {
     return saveSelectedCollection(id);
 }
 
+// =====================================================
+// COLECCIONES
+// =====================================================
+
 static bool initializeCollections() {
-    // Intentar actualizar el catálogo remoto.
     if (WiFi.status() == WL_CONNECTED) {
         downloadCollectionCatalog();
     }
 
-    // Si no hay catálogo local, no podemos mostrar el selector.
     if (!loadCollectionCatalog()) {
         return false;
     }
 
-    // La selección local tiene prioridad sobre config.json.
     if (!loadSelectedCollection()) {
         if (!loadDefaultCollection()) {
             if (!saveSelectedCollection(collections[0].id)) {
@@ -98,8 +105,6 @@ static bool initializeCollections() {
         }
     }
 
-    // Si la selección ya no existe en el catálogo,
-    // elegir la primera colección disponible.
     int index = findCollectionIndex(activeCollection);
 
     if (index < 0) {
@@ -112,7 +117,6 @@ static bool initializeCollections() {
 
     selectedCollectionIndex = index;
 
-    // Actualizar contenido de la colección seleccionada.
     if (WiFi.status() == WL_CONNECTED) {
         downloadCollectionContent(activeCollection);
     }
@@ -121,8 +125,18 @@ static bool initializeCollections() {
         return false;
     }
 
+    Serial.printf(
+        "Colección activa: %s (%d palabras)\n",
+        activeCollection,
+        totalWords
+    );
+
     return true;
 }
+
+// =====================================================
+// SELECTOR
+// =====================================================
 
 static void openCollectionSelector() {
     appState = STATE_COLLECTION_SELECTOR;
@@ -135,6 +149,10 @@ static void openCollectionSelector() {
 
     resetInput();
 }
+
+// =====================================================
+// CONFIRMAR COLECCIÓN
+// =====================================================
 
 static void confirmCollection() {
     int index = selectedCollectionIndex;
@@ -149,13 +167,49 @@ static void confirmCollection() {
         updateImagesForActiveCollection();
     }
 
-    startGame();
-    appState = STATE_GAME;
-    resetInput();
+    // No iniciar todavía la partida.
+    // Primero esperamos a que se suelten los botones.
+    buttonsReleasedAt = 0;
+    appState = STATE_WAIT_RELEASE;
 }
+
+// =====================================================
+// ESPERAR LIBERACIÓN DE BOTONES
+// =====================================================
+
+static void handleWaitRelease() {
+
+    // Si algún botón sigue pulsado, reiniciar espera.
+    if (redPressed() || yellowPressed()) {
+        buttonsReleasedAt = 0;
+        return;
+    }
+
+    // Empezar a contar cuando ambos estén sueltos.
+    if (buttonsReleasedAt == 0) {
+        buttonsReleasedAt = millis();
+        return;
+    }
+
+    // Esperar 300 ms adicionales.
+    if (millis() - buttonsReleasedAt >= 300) {
+
+        resetInput();
+
+        startGame();
+
+        appState = STATE_GAME;
+        buttonsReleasedAt = 0;
+    }
+}
+
+// =====================================================
+// ENTRADAS DURANTE LA PARTIDA
+// =====================================================
 
 static void handleGameInput(InputAction action) {
     switch (action) {
+
         case INPUT_BOTH_LONG:
             openCollectionSelector();
             break;
@@ -166,7 +220,10 @@ static void handleGameInput(InputAction action) {
                 appState = STATE_GAME;
             } else {
                 checkAnswer(true);
-                if (gameFinished) appState = STATE_END;
+
+                if (gameFinished) {
+                    appState = STATE_END;
+                }
             }
             break;
 
@@ -175,7 +232,10 @@ static void handleGameInput(InputAction action) {
                 openCollectionSelector();
             } else {
                 checkAnswer(false);
-                if (gameFinished) appState = STATE_END;
+
+                if (gameFinished) {
+                    appState = STATE_END;
+                }
             }
             break;
 
@@ -184,17 +244,19 @@ static void handleGameInput(InputAction action) {
     }
 }
 
+// =====================================================
+// ENTRADAS EN PANTALLA FINAL
+// =====================================================
+
 static void handleEndInput(InputAction action) {
     switch (action) {
+
         case INPUT_RED:
             startGame();
             appState = STATE_GAME;
             break;
 
         case INPUT_YELLOW:
-            openCollectionSelector();
-            break;
-
         case INPUT_BOTH_LONG:
             openCollectionSelector();
             break;
@@ -204,8 +266,13 @@ static void handleEndInput(InputAction action) {
     }
 }
 
+// =====================================================
+// ENTRADAS EN SELECTOR
+// =====================================================
+
 static void handleSelectorInput(InputAction action) {
     switch (action) {
+
         case INPUT_RED:
             previousCollection();
 
@@ -226,11 +293,7 @@ static void handleSelectorInput(InputAction action) {
             );
             break;
 
-        case INPUT_BOTH_SHORT:
-            confirmCollection();
-            break;
-
-        case INPUT_BOTH_LONG:
+        case INPUT_RED_LONG:
             confirmCollection();
             break;
 
@@ -239,9 +302,15 @@ static void handleSelectorInput(InputAction action) {
     }
 }
 
+// =====================================================
+// SETUP
+// =====================================================
+
 void setup() {
     Serial.begin(115200);
     delay(300);
+
+    Serial.println("English Kids: inicio");
 
     initHardware();
     initInput();
@@ -269,9 +338,14 @@ void setup() {
         updateImagesForActiveCollection();
     }
 
-    startGame();
-    appState = STATE_GAME;
+    // Al arrancar, mostrar siempre el selector.
+    // Se conserva la última colección seleccionada.
+    openCollectionSelector();
 }
+
+// =====================================================
+// LOOP
+// =====================================================
 
 void loop() {
     if (appState == STATE_ERROR) {
@@ -282,6 +356,7 @@ void loop() {
     InputAction action = readInput();
 
     switch (appState) {
+
         case STATE_GAME:
             handleGameInput(action);
             break;
@@ -292,6 +367,10 @@ void loop() {
 
         case STATE_COLLECTION_SELECTOR:
             handleSelectorInput(action);
+            break;
+
+        case STATE_WAIT_RELEASE:
+            handleWaitRelease();
             break;
 
         default:

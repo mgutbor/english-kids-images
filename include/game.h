@@ -9,6 +9,8 @@ extern int currentQuestion;
 extern int leftOption;
 extern int rightOption;
 
+extern int* getQuestionOrder();
+
 void startGame();
 void nextQuestion();
 void checkAnswer(bool redAnswer);

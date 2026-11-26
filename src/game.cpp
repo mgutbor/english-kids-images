@@ -1,18 +1,19 @@
 #include <Arduino.h>
+
+#include "config.h"
 #include "game.h"
 #include "collections.h"
 #include "display.h"
 #include "hardware.h"
-#include "config.h"
 
 bool gameFinished = false;
 int score = 0;
 int currentQuestion = 0;
 
+int leftOption = -1;
+int rightOption = -1;
+
 static int questionOrder[MAX_WORDS];
-int leftOption = 0;
-int rightOption = 1;
-static bool leftIsCorrect = true;
 
 static void shuffleQuestions() {
     for (int i = 0; i < totalWords; i++) {
@@ -29,35 +30,42 @@ static void shuffleQuestions() {
 }
 
 static void chooseOptions() {
-    int correct = questionOrder[currentQuestion];
+    // Índice real de la palabra que hay que adivinar.
+    int correctOption = questionOrder[currentQuestion];
 
-    int incorrect;
+    // Elegir una palabra incorrecta diferente.
+    int incorrectOption;
 
     do {
-        incorrect = random(totalWords);
-    } while (incorrect == correct);
+        incorrectOption = random(totalWords);
+    } while (incorrectOption == correctOption);
 
-    leftIsCorrect = random(2) == 0;
-
-    if (leftIsCorrect) {
-        leftOption = correct;
-        rightOption = incorrect;
+    // Decidir aleatoriamente dónde aparece la correcta.
+    if (random(2) == 0) {
+        leftOption = correctOption;
+        rightOption = incorrectOption;
     } else {
-        leftOption = incorrect;
-        rightOption = correct;
+        leftOption = incorrectOption;
+        rightOption = correctOption;
     }
 }
 
 void startGame() {
     if (totalWords < 2) {
         gameFinished = true;
-        drawFatalError("La coleccion necesita al menos dos palabras");
+        drawFatalError("Necesitas al menos dos palabras");
         return;
     }
 
     score = 0;
     currentQuestion = 0;
     gameFinished = false;
+
+    Serial.printf(
+        "Partida iniciada: %s (%d palabras)\n",
+        collectionTitle,
+        totalWords
+    );
 
     shuffleQuestions();
     chooseOptions();
@@ -79,9 +87,20 @@ void nextQuestion() {
 void checkAnswer(bool redAnswer) {
     if (gameFinished) return;
 
-    bool correct = redAnswer
-        ? leftIsCorrect
-        : !leftIsCorrect;
+    // El botón rojo selecciona izquierda.
+    // El botón amarillo selecciona derecha.
+    int selectedOption = redAnswer
+        ? leftOption
+        : rightOption;
+
+    // La respuesta correcta siempre es questionOrder[currentQuestion].
+    int correctOption = questionOrder[currentQuestion];
+
+    bool correct = selectedOption == correctOption;
+
+    if (correct) {
+        score++;
+    }
 
     tft.fillRect(0, 145, 320, 30, ILI9341_BLACK);
 
@@ -89,7 +108,6 @@ void checkAnswer(bool redAnswer) {
     tft.setCursor(95, 150);
 
     if (correct) {
-        score++;
         tft.setTextColor(ILI9341_GREEN);
         tft.print("CORRECTO");
     } else {
@@ -98,6 +116,7 @@ void checkAnswer(bool redAnswer) {
     }
 
     delay(1100);
+
     nextQuestion();
 }
 
@@ -108,4 +127,8 @@ void finishGame() {
 
 bool isGameFinished() {
     return gameFinished;
+}
+
+int* getQuestionOrder() {
+    return questionOrder;
 }

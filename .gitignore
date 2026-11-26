@@ -2,6 +2,7 @@
 .vscode/
 tmp/
 .DS_Store
+.venv/
 
 # Credenciales
 include/secrets.h
